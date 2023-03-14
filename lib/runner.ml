@@ -1,5 +1,6 @@
 [@@@part "0"] ;;
 open Core
+open Printf
 open Lexer
 open Lexing
 
@@ -23,10 +24,33 @@ let parse_with_error lexbuf =
 
 [@@@part "1"] ;;
 
+let translate_expression : Ast.expression -> Asm.instruction list = function
+  | `Constant i ->
+      Asm.[
+        Mov (Immediate i, Register)
+      ]
+
+let translate_statement = function
+  | Ast.Return expr -> translate_expression expr
+
+let translate_function ast_func : Asm.function_definition =
+  let body = Ast.(translate_statement ast_func.body @ [Ret]) in
+  {Asm.name = ast_func.name; body}
+
+let translate_program ast_prog =
+  {Asm.funcs = translate_function Ast.(ast_prog.funcs)}
+
+[@@@part "2"] ;;
+
 let rec parse_and_print lexbuf =
   match parse_with_error lexbuf with
   | Some value ->
-      print_s ([%sexp (value : Ast.program)]);
+(*     print_s ([%sexp (value : Ast.program)]); *)
+    let asm = translate_program value in
+(*     print_s ([%sexp (asm : Asm.program)]); *)
+    let rendered_asm = Asm.render_program asm in
+(*     printf "%s" rendered_asm; *)
+    Out_channel.write_all "out.s" ~data:rendered_asm;
     parse_and_print lexbuf
   | None -> ()
 

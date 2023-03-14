@@ -4,6 +4,6 @@
 
 (library
  (name coyc)
- (libraries core core_unix.command_unix)
+ (libraries core core_unix.command_unix containers)
  (flags :standard -warn-error -27-8)
  (preprocess (pps ppx_jane)))

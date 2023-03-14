@@ -9,7 +9,6 @@
 %token SEMICOLON
 %token EOF
 
-%[@trace true]
 %start <Ast.program option> prog
 
 %%
