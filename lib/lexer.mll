@@ -16,10 +16,10 @@ rule read =
   parse
   | white    { read lexbuf }
   | newline  { Lexing.new_line lexbuf; read lexbuf }
-  | constant { CONSTANT (int_of_string (Lexing.lexeme lexbuf)) }
-  | identifier { IDENTIFIER (Lexing.lexeme lexbuf) }
   | int_k    { INT_KW }
   | return_k { RETURN_KW }
+  | constant { CONSTANT (int_of_string (Lexing.lexeme lexbuf)) }
+  | identifier { IDENTIFIER (Lexing.lexeme lexbuf) }
   | '{'      { BRACE_OPEN }
   | '}'      { BRACE_CLOSE }
   | '('      { PAREN_OPEN }

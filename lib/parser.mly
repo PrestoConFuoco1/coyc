@@ -9,17 +9,24 @@
 %token SEMICOLON
 %token EOF
 
-%start <Ast.ast list option> prog
+%[@trace true]
+%start <Ast.program option> prog
 
 %%
 
 prog: 
-  | v = semicolon_list { Some v }
+  | v = function_definition { Some v }
   | EOF       { None   } ;
 
-semicolon_list:
-  BRACE_OPEN; obj = separated_list(SEMICOLON, one_token); BRACE_CLOSE    { obj } ;
+function_definition:
+  INT_KW; name = IDENTIFIER; PAREN_OPEN; PAREN_CLOSE;
+    BRACE_OPEN; body = statement; BRACE_CLOSE
+      {
+        {Ast.funcs = {Ast.name = `Identifier name; body}}
+      };
 
-one_token:
-  | s = IDENTIFIER                            { `Identifier s }
-  | i = CONSTANT                              { `Constant i }
+statement:
+  | RETURN_KW; e = expression; SEMICOLON { Ast.Return e };
+
+expression:
+  | const = CONSTANT { `Constant const };
