@@ -9,6 +9,15 @@ type unary_operator =
   ]
   [@@deriving sexp]
 
+type binary_operator =
+  [ `Add
+  | `Subtract
+  | `Multiply
+  | `Divide
+  | `Mod
+  ]
+  [@@deriving sexp]
+
 type value =
   [ `Constant of int
   | `Var of identifier
@@ -17,6 +26,7 @@ type value =
 
 type assignment = 
   [ `Unary of (unary_operator * value * value) (* first is source, second is dest *)
+  | `Binary of (binary_operator * value * value * value)
   ]
   [@@deriving sexp]
 

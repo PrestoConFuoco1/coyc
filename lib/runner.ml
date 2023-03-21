@@ -10,8 +10,10 @@ let print_position outx lexbuf =
     pos.pos_lnum (pos.pos_cnum - pos.pos_bol + 1)
 
 [@@@ocaml.warning "-8-27"]
+
 let print_token tok = printf "%s" (match tok with
   | Parser.IDENTIFIER i -> "ident")
+
 
 let parse_with_error lexbuf =
   try Parser.prog (fun l -> let t = Lexer.read l in (); t) lexbuf with
@@ -29,11 +31,8 @@ let parse_with_error lexbuf =
 let rec parse_and_print lexbuf =
   match parse_with_error lexbuf with
   | Some value ->
-(*     print_s ([%sexp (value : Ast.program)]); *)
     let asm = Conversions.total value in
-(*     print_s ([%sexp (asm : Asm.program)]); *)
     let rendered_asm = Asm.render_program asm in
-(*     printf "%s" rendered_asm; *)
     Out_channel.write_all "out.s" ~data:rendered_asm;
     parse_and_print lexbuf
   | None -> ()

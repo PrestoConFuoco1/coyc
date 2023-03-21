@@ -9,7 +9,7 @@ module Ast_to_asm = struct
 let translate_expression : Ast.expression -> Asm.instruction list = function
   | `Constant i ->
       Asm.[
-        Mov (Immediate i, Register (failwith ""))
+        Mov (Immediate i, Register (failwith ))
       ]
 
 let translate_statement = function
@@ -39,19 +39,29 @@ let mk_fresh_var () : string =
 
 let rec translate_expression (ast_expr : Ast.expression) : (Tacky.assignment list * Tacky.value) =
   match ast_expr with
+  | `Constant const -> ([], `Constant const)
   | `Unary (unop, expr) ->
       let (instrs, val_) = translate_expression expr in
       let new_var = `Var (`Identifier (mk_fresh_var ())) in
       let assign = `Unary (unop, val_, new_var) in
       (instrs @ [assign], new_var)
-  | `Constant const -> ([], `Constant const)
+  | `Binary (binop, expr1, expr2) ->
+      let (instrs1, val1) = translate_expression expr1 in
+      let (instrs2, val2) = translate_expression expr2 in
+      let new_var = `Var (`Identifier (mk_fresh_var ())) in
+      let assign = `Binary (binop, val1, val2, new_var) in
+      (List.concat [instrs1; instrs2; [assign]], new_var)
+      
 
 let translate_statement (ast_stmt : Ast.statement) : Tacky.instruction list =
+  let handle_expr expr =
+    let (instrs, final_val) = translate_expression expr in
+    (instrs :> Tacky.instruction list) @ [ `Return final_val] in
+
   match ast_stmt with
   | Return (`Constant const) -> [`Return (`Constant const)]
-  | Return (`Unary _ as expr) ->
-    let (instrs, final_val) = translate_expression expr in
-    (instrs :> Tacky.instruction list) @ [ `Return final_val]
+  | Return (`Unary _ as expr) -> handle_expr expr
+  | Return (`Binary _ as expr) -> handle_expr expr
 
 let translate_function ast_func =
   Ast.{Tacky.name = ast_func.name; Tacky.body = translate_statement ast_func.body}
@@ -109,6 +119,17 @@ let translate_instruction (tacky_instr : Tacky.instruction) =
       let in_operand = value_to_operand in_var in
       let asm_op = translate_unop unop in
       [Asm.Mov (in_operand, out_operand); Unary (asm_op, out_operand)]
+  | `Binary (binop, in1_var, in2_var, out_var) ->
+      let handle_simple_operation (asm_op : Asm.binary_operator) =
+        [ Asm.Mov (value_to_operand in1_var, value_to_operand out_var)
+        ; Asm.Binary (asm_op, value_to_operand in2_var, value_to_operand out_var)
+        ] in
+
+      match binop with
+      | `Add -> handle_simple_operation Asm.Add
+      | `Subtract -> handle_simple_operation Asm.Sub
+      | `Multiply -> handle_simple_operation Asm.IMul
+      | `Divide | `Mod -> failwith "not implemented"
 
 let translate_function tacky_func =
   Tacky.{Asm.name = tacky_func.name; Asm.body = List.concat_map ~f:translate_instruction tacky_func.body}
@@ -118,7 +139,7 @@ let translate_program (tacky_prog : Tacky.program) =
 
 end
 
-(* let undefined = failwith "" *)
+(* let undefined = failwith *)
 
 module Asm_pseudo_to_asm_stack = struct
 
@@ -160,7 +181,10 @@ let replace_step instr =
   | Mov (op1, op2) ->
       let mov_constr = fun x1 x2 -> Mov (x1, x2) in
       (State.(!$$)) mov_constr (replace_operand op1) (replace_operand op2)
-  | Unary (unop, op) -> State.map ~f:(fun x -> Unary (unop, x)) (replace_operand op)
+  | Unary (unop, op) ->
+      State.map ~f:(fun x -> Unary (unop, x)) (replace_operand op)
+  | Binary (binop, op1, op2) -> 
+      State.(!$$) (fun x y -> Binary (binop, x, y)) (replace_operand op1) (replace_operand op2)
   | AllocateStack _offset ->
       failwith "there shouldn't be any stack related instructions before this step"
   | Ret -> State.return Ret
@@ -169,7 +193,7 @@ let fix_instruction asm_pseudo_instr : Asm.instruction list =
   match asm_pseudo_instr with
 (*   | Mov (Stack _ as op1, Stack _ as op2) -> [Mov (op1, Register R10); Mov (Register R10, op2)] *)
   | Mov ((Stack _ as op1), (Stack _ as op2)) -> [Mov (op1, Register R10); Mov (Register R10, op2)]
-  | Mov _ | Unary _ | AllocateStack _ | Ret -> List.return asm_pseudo_instr
+  | Mov _ | Binary _ | Unary _ | AllocateStack _ | Ret -> List.return asm_pseudo_instr
 
 let translate_function asm_pseudo_func =
   let init = ((0, Map.empty (module String)) : accum) in

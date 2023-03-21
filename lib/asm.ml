@@ -20,8 +20,12 @@ type operand =
 type unary_operator = Neg | Not
   [@@deriving sexp]
 
+type binary_operator = Add | Sub | IMul
+  [@@deriving sexp]
+
 type instruction =
   | Mov of operand * operand
+  | Binary of binary_operator * operand * operand
   | Unary of unary_operator * operand
   | AllocateStack of int (* subq $n, %rsp *)
   | Ret
@@ -56,6 +60,11 @@ let render_unary_operator = function
   | Neg -> "negl"
   | Not -> "notl"
 
+let render_binop = function
+  | Add -> "addl"
+  | Sub -> "subl"
+  | IMul -> "imul"
+
 let function_prologue : string list =
   [ "\tpushq\t%rbp"
   ; binary_instruction "movq" "%rsp" "%rbp"
@@ -70,6 +79,8 @@ let render_instruction = function
       [binary_instruction "movl" (render_operand o1) (render_operand o2)]
   | Unary (unop, o) ->
       [sprintf "\t%s\t%s" (render_unary_operator unop) (render_operand o)]
+  | Binary (binop, o1, o2) ->
+      [binary_instruction (render_binop binop) (render_operand o1) (render_operand o2)]
   | Ret -> function_epilogue @ ["\tret"]
   | AllocateStack alloc_size ->
       [binary_instruction "subq" (render_operand (Immediate alloc_size)) "%rsp"]

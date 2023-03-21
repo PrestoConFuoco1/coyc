@@ -13,9 +13,19 @@ type unary_operator =
   ]
   [@@deriving sexp]
 
+type binary_operator =
+  [ `Add
+  | `Subtract
+  | `Multiply
+  | `Divide
+  | `Mod
+  ]
+  [@@deriving sexp]
+
 type expression =
   [ `Constant of int
   | `Unary of unary_operator * expression
+  | `Binary of binary_operator * expression * expression
   ]
   [@@deriving sexp]
 
