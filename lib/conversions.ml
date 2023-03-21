@@ -51,7 +51,6 @@ let rec translate_expression (ast_expr : Ast.expression) : (Tacky.assignment lis
       let new_var = `Var (`Identifier (mk_fresh_var ())) in
       let assign = `Binary (binop, val1, val2, new_var) in
       (List.concat [instrs1; instrs2; [assign]], new_var)
-      
 
 let translate_statement (ast_stmt : Ast.statement) : Tacky.instruction list =
   let handle_expr expr =
@@ -120,16 +119,28 @@ let translate_instruction (tacky_instr : Tacky.instruction) =
       let asm_op = translate_unop unop in
       [Asm.Mov (in_operand, out_operand); Unary (asm_op, out_operand)]
   | `Binary (binop, in1_var, in2_var, out_var) ->
+      let in1_op = value_to_operand in1_var in
+      let in2_op = value_to_operand in2_var in
+      let out_op = value_to_operand out_var in
       let handle_simple_operation (asm_op : Asm.binary_operator) =
-        [ Asm.Mov (value_to_operand in1_var, value_to_operand out_var)
-        ; Asm.Binary (asm_op, value_to_operand in2_var, value_to_operand out_var)
+        [ Asm.Mov (in1_op, out_op)
+        ; Asm.Binary (asm_op, in2_op, out_op)
         ] in
 
       match binop with
       | `Add -> handle_simple_operation Asm.Add
       | `Subtract -> handle_simple_operation Asm.Sub
       | `Multiply -> handle_simple_operation Asm.IMul
-      | `Divide | `Mod -> failwith "not implemented"
+      | (`Divide | `Mod) as binop_ ->
+          let resulting_register =
+            match binop_ with
+            | `Divide -> Asm.AX
+            | `Mod -> DX in
+          [ Asm.Mov (in1_op, Register AX)
+          ; Cdq
+          ; IDiv in2_op
+          ; Mov (Register resulting_register, out_op)
+          ]
 
 let translate_function tacky_func =
   Tacky.{Asm.name = tacky_func.name; Asm.body = List.concat_map ~f:translate_instruction tacky_func.body}
@@ -185,9 +196,10 @@ let replace_step instr =
       State.map ~f:(fun x -> Unary (unop, x)) (replace_operand op)
   | Binary (binop, op1, op2) -> 
       State.(!$$) (fun x y -> Binary (binop, x, y)) (replace_operand op1) (replace_operand op2)
+  | IDiv op -> State.map ~f:(fun x -> IDiv x) (replace_operand op)
   | AllocateStack _offset ->
       failwith "there shouldn't be any stack related instructions before this step"
-  | Ret -> State.return Ret
+  | (Ret | Cdq) as const_instr -> State.return const_instr
 
 let fix_instruction asm_pseudo_instr : Asm.instruction list =
   match asm_pseudo_instr with
@@ -201,13 +213,16 @@ let fix_instruction asm_pseudo_instr : Asm.instruction list =
       ; Binary (binop, Register R10, op2)
       ]
   (* For imul, regardless of the src operand, the dest operand can't be memory *)
-      (*
   | Binary (IMul, op1, (Stack _ as op2)) ->
       [ Mov (op2, Register R11)
       ; Binary (IMul, op1, Register R11)
       ; Mov (Register R11, op2)
-      ] *)
-  | Mov _ | Binary _ | Unary _ | AllocateStack _ | Ret -> List.return asm_pseudo_instr
+      ]
+  | IDiv (Immediate _ as op) ->
+      [ Mov (op, Register R10)
+      ; IDiv (Register R10)
+      ]
+  | Mov _ | Binary _ | Unary _ | AllocateStack _ | Ret | IDiv _ | Cdq -> List.return asm_pseudo_instr
 
 let translate_function asm_pseudo_func =
   let init = ((0, Map.empty (module String)) : accum) in

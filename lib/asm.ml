@@ -7,6 +7,7 @@ type identifier = [ `Identifier of string ]
 
 type reg =
   | AX
+  | DX
   | R10
   | R11
   [@@deriving sexp]
@@ -26,8 +27,10 @@ type binary_operator = Add | Sub | IMul
 
 type instruction =
   | Mov of operand * operand
-  | Binary of binary_operator * operand * operand
   | Unary of unary_operator * operand
+  | Binary of binary_operator * operand * operand
+  | IDiv of operand
+  | Cdq
   | AllocateStack of int (* subq $n, %rsp *)
   | Ret
   [@@deriving sexp]
@@ -46,6 +49,7 @@ type program =
 (****************************************************)
 let render_register = function
   | AX -> "eax"
+  | DX -> "edx"
   | R10 -> "r10d"
   | R11 -> "r11d"
 
@@ -83,6 +87,8 @@ let render_instruction = function
       [sprintf "\t%s\t%s" (render_unary_operator unop) (render_operand o)]
   | Binary (binop, o1, o2) ->
       [binary_instruction (render_binop binop) (render_operand o1) (render_operand o2)]
+  | IDiv op -> [sprintf "\tidiv\t%s" (render_operand op)]
+  | Cdq -> ["\tcdq"]
   | Ret -> function_epilogue @ ["\tret"]
   | AllocateStack alloc_size ->
       [binary_instruction "subq" (render_operand (Immediate alloc_size)) "%rsp"]
