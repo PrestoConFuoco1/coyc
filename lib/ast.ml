@@ -7,7 +7,16 @@ type ast = [
   ] [@@deriving sexp]
 *)
 
-type expression = [`Constant of int]
+type unary_operator =
+  [ `Complement
+  | `Negate
+  ]
+  [@@deriving sexp]
+
+type expression =
+  [ `Constant of int
+  | `Unary of unary_operator * expression
+  ]
   [@@deriving sexp]
 
 type statement =

@@ -25,5 +25,8 @@ rule read =
   | '('      { PAREN_OPEN }
   | ')'      { PAREN_CLOSE }
   | ';'      { SEMICOLON }
+  | "--"     { DECREMENT }
+  | '-'      { MINUS }
+  | '~'      { COMPLEMENT }
   | _ { raise (SyntaxError ("Unexpected char: " ^ Lexing.lexeme lexbuf)) }
   | eof      { EOF }
