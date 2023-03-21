@@ -192,7 +192,21 @@ let replace_step instr =
 let fix_instruction asm_pseudo_instr : Asm.instruction list =
   match asm_pseudo_instr with
 (*   | Mov (Stack _ as op1, Stack _ as op2) -> [Mov (op1, Register R10); Mov (Register R10, op2)] *)
-  | Mov ((Stack _ as op1), (Stack _ as op2)) -> [Mov (op1, Register R10); Mov (Register R10, op2)]
+  | Mov ((Stack _ as op1), (Stack _ as op2)) ->
+      [ Mov (op1, Register R10)
+      ; Mov (Register R10, op2)
+      ]
+  | Binary ((Add | Sub) as binop, (Stack _ as op1), (Stack _ as op2)) ->
+      [ Mov (op1, Register R10)
+      ; Binary (binop, Register R10, op2)
+      ]
+  (* For imul, regardless of the src operand, the dest operand can't be memory *)
+      (*
+  | Binary (IMul, op1, (Stack _ as op2)) ->
+      [ Mov (op2, Register R11)
+      ; Binary (IMul, op1, Register R11)
+      ; Mov (Register R11, op2)
+      ] *)
   | Mov _ | Binary _ | Unary _ | AllocateStack _ | Ret -> List.return asm_pseudo_instr
 
 let translate_function asm_pseudo_func =

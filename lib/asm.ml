@@ -8,6 +8,7 @@ type identifier = [ `Identifier of string ]
 type reg =
   | AX
   | R10
+  | R11
   [@@deriving sexp]
 
 type operand =
@@ -46,6 +47,7 @@ type program =
 let render_register = function
   | AX -> "eax"
   | R10 -> "r10d"
+  | R11 -> "r11d"
 
 let binary_instruction =
   sprintf "\t%s\t%s, %s"
@@ -63,7 +65,7 @@ let render_unary_operator = function
 let render_binop = function
   | Add -> "addl"
   | Sub -> "subl"
-  | IMul -> "imul"
+  | IMul -> "imull"
 
 let function_prologue : string list =
   [ "\tpushq\t%rbp"

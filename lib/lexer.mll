@@ -27,6 +27,10 @@ rule read =
   | ';'      { SEMICOLON }
   | "--"     { DECREMENT }
   | '-'      { MINUS }
+  | '+'      { PLUS }
+  | '/'      { DIV }
+  | '*'      { TIMES }
+  | '%'      { MOD }
   | '~'      { COMPLEMENT }
   | _ { raise (SyntaxError ("Unexpected char: " ^ Lexing.lexeme lexbuf)) }
   | eof      { EOF }

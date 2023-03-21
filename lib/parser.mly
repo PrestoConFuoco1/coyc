@@ -18,6 +18,7 @@
 
 %left PLUS MINUS        /* lowest precedence */
 %left TIMES DIV MOD     /* medium precedence */
+%nonassoc UMINUS
 
 %start <Ast.program option> prog
 
@@ -38,17 +39,17 @@ statement:
   | RETURN_KW; e = expression; SEMICOLON { Ast.Return e };
 
 expression:
-  | e = factor { e }
+  | const = CONSTANT
+    { `Constant const } 
+  | u = unop; e = expression %prec UMINUS
+    { `Unary (u, e) }
+  | PAREN_OPEN; e = expression; PAREN_CLOSE
+    { e }
   | e1 = expression; PLUS; e2 = expression { `Binary (`Add, e1, e2) }
   | e1 = expression; MINUS; e2 = expression { `Binary (`Subtract, e1, e2) }
   | e1 = expression; TIMES; e2 = expression { `Binary (`Multiply, e1, e2) }
   | e1 = expression; DIV; e2 = expression { `Binary (`Divide, e1, e2) }
   | e1 = expression; MOD; e2 = expression { `Binary (`Mod, e1, e2) }
-
-factor:
-  | const = CONSTANT { `Constant const }
-  | u = unop; e = expression { `Unary (u, e) }
-  | PAREN_OPEN; e = expression; PAREN_CLOSE { e }
 
 unop:
   | DECREMENT { failwith "not implemented" }
