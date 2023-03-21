@@ -30,7 +30,7 @@ let rec parse_and_print lexbuf =
   match parse_with_error lexbuf with
   | Some value ->
 (*     print_s ([%sexp (value : Ast.program)]); *)
-    let asm = Conversions.Ast_to_asm.translate_program value in
+    let asm = Conversions.total value in
 (*     print_s ([%sexp (asm : Asm.program)]); *)
     let rendered_asm = Asm.render_program asm in
 (*     printf "%s" rendered_asm; *)

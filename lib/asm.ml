@@ -40,28 +40,44 @@ type program =
 
 (****************************************************)
 let render_register = function
-  | AX -> "ax"
-  | R10 -> "r10"
+  | AX -> "eax"
+  | R10 -> "r10d"
+
+let binary_instruction =
+  sprintf "\t%s\t%s, %s"
 
 let render_operand = function
   | Immediate i -> sprintf "$%d" i
   | Register reg -> sprintf "%%%s" (render_register reg)
-  | _ -> failwith ""
+  | Pseudo _ -> failwith "Internal error: there shouldn't be pseudo registers at this stage"
+  | Stack offset -> sprintf "%d(%%rbp)" offset
 
 let render_unary_operator = function
-  | Neg -> "neg"
-  | Not -> "not"
+  | Neg -> "negl"
+  | Not -> "notl"
+
+let function_prologue : string list =
+  [ "\tpushq\t%rbp"
+  ; binary_instruction "movq" "%rsp" "%rbp"
+  ]
+
+let function_epilogue : string list =
+  [ binary_instruction "movq" "%rbp" "%rsp"
+  ; "\tpopq\t%rbp" ]
 
 let render_instruction = function
-  | Mov (o1, o2) -> sprintf "\tmovl\t%s, %s" (render_operand o1) (render_operand o2)
-  | Unary (unop, o) -> sprintf "\t%s\t%s" (render_unary_operator unop) (render_operand o)
-  | Ret -> "\tret"
-  | _ -> failwith ""
+  | Mov (o1, o2) ->
+      [binary_instruction "movl" (render_operand o1) (render_operand o2)]
+  | Unary (unop, o) ->
+      [sprintf "\t%s\t%s" (render_unary_operator unop) (render_operand o)]
+  | Ret -> function_epilogue @ ["\tret"]
+  | AllocateStack alloc_size ->
+      [binary_instruction "subq" (render_operand (Immediate alloc_size)) "%rsp"]
 
 let render_function p =
   let `Identifier fname = p.name in
-  let rend_instr = List.map p.body ~f:render_instruction in
-  sprintf "%s:" fname :: rend_instr
+  let rend_instr = List.concat_map p.body ~f:render_instruction in
+  sprintf "%s:" fname :: (function_prologue @ rend_instr)
 
 let render_program (p : program) =
   let main_glob = "\t.globl\tmain" in

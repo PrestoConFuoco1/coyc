@@ -3,6 +3,7 @@ open Stdio
 
 (* ast to asm *)
 
+(*
 module Ast_to_asm = struct
 
 let translate_expression : Ast.expression -> Asm.instruction list = function
@@ -22,6 +23,7 @@ let translate_program ast_prog =
   {Asm.funcs = translate_function Ast.(ast_prog.funcs)}
 
 end
+*)
 
 module Ast_to_tacky = struct
 
@@ -230,3 +232,8 @@ let%expect_test "one unary" =
     (Unary Not (Stack -8))
     (Mov (Stack -8) (Register AX))
     Ret |}]
+
+let total ast =
+  ast |> Ast_to_tacky.translate_program
+      |> Tacky_to_asm_pseudo.translate_program
+      |> Asm_pseudo_to_asm_stack.translate_program
