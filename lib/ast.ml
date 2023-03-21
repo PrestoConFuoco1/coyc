@@ -13,12 +13,30 @@ type unary_operator =
   ]
   [@@deriving sexp]
 
-type binary_operator =
+type logical_binary_operator =
+  [ `And
+  | `Or
+  | `Equal
+  | `NotEqual
+  | `LesserThan
+  | `LesserOrEqual
+  | `GreaterThen
+  | `GreaterOrEqual
+  ]
+  [@@deriving sexp]
+
+type arith_binary_operator =
   [ `Add
   | `Subtract
   | `Multiply
   | `Divide
   | `Mod
+  ]
+  [@@deriving sexp]
+
+type binary_operator =
+  [ logical_binary_operator
+  | arith_binary_operator
   ]
   [@@deriving sexp]
 

@@ -25,6 +25,7 @@ rule read =
   | '('      { PAREN_OPEN }
   | ')'      { PAREN_CLOSE }
   | ';'      { SEMICOLON }
+
   | "--"     { DECREMENT }
   | '-'      { MINUS }
   | '+'      { PLUS }
@@ -32,5 +33,16 @@ rule read =
   | '*'      { TIMES }
   | '%'      { MOD }
   | '~'      { COMPLEMENT }
+
+  | "=="     { EQUAL }
+  | "!="     { NOT_EQUAL }
+  | "<="     { LESSER_OR_EQUAL }
+  | ">="     { GREATER_OR_EQUAL }
+  | '<'      { LESSER }
+  | '>'      { GREATER }
+  | '!'      { NOT }
+  | "&&"     { AND }
+  | "||"     { OR }
+  |
   | _ { raise (SyntaxError ("Unexpected char: " ^ Lexing.lexeme lexbuf)) }
   | eof      { EOF }

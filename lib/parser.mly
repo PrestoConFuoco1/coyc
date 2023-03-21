@@ -16,6 +16,17 @@
 %token DIV
 %token MOD
 
+%token EQUAL
+%token NOT_EQUAL
+%token LESSER
+%token GREATER
+%token LESSER_OR_EQUAL
+%token GREATER_OR_EQUAL
+
+%token NOT
+%token AND
+%token OR
+
 %left PLUS MINUS        /* lowest precedence */
 %left TIMES DIV MOD     /* medium precedence */
 %nonassoc UMINUS
