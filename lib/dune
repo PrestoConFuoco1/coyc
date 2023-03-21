@@ -4,7 +4,7 @@
 
 (library
  (name coyc)
- (libraries core core_unix.command_unix containers)
+ (libraries core core_unix.command_unix containers monads)
  (flags :standard -warn-error -27-8-20)
- (preprocess (pps ppx_jane ppx_js_style -allow-toplevel-expression))
+ (preprocess (pps ppx_jane ppx_js_style -allow-toplevel-expression ppx_let))
  (inline_tests))

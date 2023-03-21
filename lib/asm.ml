@@ -22,7 +22,7 @@ type unary_operator = Neg | Not
 
 type instruction =
   | Mov of operand * operand
-  | Unary of (unary_operator * operand)
+  | Unary of unary_operator * operand
   | AllocateStack of int (* subq $n, %rsp *)
   | Ret
   [@@deriving sexp]

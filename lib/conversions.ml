@@ -76,17 +76,17 @@ let%expect_test "return constant" =
 let%expect_test "one unary" =
   convert_and_print @@ Ast.Return (`Unary (`Complement, (`Constant 2)));
   [%expect {|
-    (Unary (Complement (Constant 2) (Var koala574)))
-    (Return (Var koala574)) |}]
+    (Unary (Complement (Constant 2) (Var (Identifier koala574))))
+    (Return (Var (Identifier koala574))) |}]
 
 let%expect_test "one unary" =
   convert_and_print @@ Ast.Return (`Unary (`Complement, (`Unary (`Negate, (`Constant 2)))));
   [%expect {|
-    (Unary (Negate (Constant 2) (Var koala574)))
-    (Unary (Complement (Var koala574) (Var camel368)))
-    (Return (Var camel368)) |}]
+    (Unary (Negate (Constant 2) (Var (Identifier koala574))))
+    (Unary (Complement (Var (Identifier koala574)) (Var (Identifier camel368))))
+    (Return (Var (Identifier camel368))) |}]
 
-module Tacky_to_asm1 = struct
+module Tacky_to_asm_pseudo = struct
 
 let value_to_operand (tacky_value : Tacky.value) =
   match tacky_value with
@@ -115,3 +115,118 @@ let translate_program (tacky_prog : Tacky.program) =
   { Asm.funcs = translate_function tacky_prog.funcs }
 
 end
+
+(* let undefined = failwith "" *)
+
+module Asm_pseudo_to_asm_stack = struct
+
+open Asm
+
+module State = Monads.Std.Monad.State
+
+type accum = int * (string, int, Base.String.comparator_witness) Base.Map.t
+
+let replace_operand (asm_pseudo_opd : operand) : (operand, accum) State.t =
+  match asm_pseudo_opd with
+  | Immediate _ | Register _ -> State.return asm_pseudo_opd
+  | Pseudo (`Identifier identifier) ->
+      let open State.Let_syntax in
+      let%bind (current_offset, offset_map) as old_accum = State.get () in
+
+      let (new_op, new_accum) =
+        let opt_existing_offset = Map.find offset_map identifier in
+        match opt_existing_offset with
+        | None ->
+            let hald_of_word = 4 in (* currently we handle only ints, which are 32bit *)
+            let new_current_offset = current_offset + hald_of_word in
+            let new_offset_map_or_duplicate =
+              Map.add offset_map ~key:identifier ~data:new_current_offset in
+            let new_offset_map =
+              match new_offset_map_or_duplicate with
+              | `Ok new_offset_map -> new_offset_map
+              | `Duplicate -> failwith "Internal error: failed to insert new pseudo register"
+              in
+            (Stack (- new_current_offset), (new_current_offset, new_offset_map))
+        | Some existing_offset -> (Stack (- existing_offset), old_accum) in
+      let%bind () = State.put new_accum in
+      State.return new_op
+  | Stack _ ->
+      failwith "Internal error: there shouldn't be any stack related instructions before this step"
+
+let replace_step instr =
+  match instr with
+  | Mov (op1, op2) ->
+      let mov_constr = fun x1 x2 -> Mov (x1, x2) in
+      (State.(!$$)) mov_constr (replace_operand op1) (replace_operand op2)
+  | Unary (unop, op) -> State.map ~f:(fun x -> Unary (unop, x)) (replace_operand op)
+  | AllocateStack _offset ->
+      failwith "there shouldn't be any stack related instructions before this step"
+  | Ret -> State.return Ret
+
+let fix_instruction asm_pseudo_instr : Asm.instruction list =
+  match asm_pseudo_instr with
+(*   | Mov (Stack _ as op1, Stack _ as op2) -> [Mov (op1, Register R10); Mov (Register R10, op2)] *)
+  | Mov ((Stack _ as op1), (Stack _ as op2)) -> [Mov (op1, Register R10); Mov (Register R10, op2)]
+  | Mov _ | Unary _ | AllocateStack _ | Ret -> List.return asm_pseudo_instr
+
+let translate_function asm_pseudo_func =
+  let init = ((0, Map.empty (module String)) : accum) in
+  let rec map_from_left lst ~f : ('b list, 'c) State.t =
+    match lst with
+    | [] -> State.return []
+    | x :: xs ->
+        let open State.Let_syntax in
+        let%bind x' = f x in
+        let%bind xs' = map_from_left xs ~f in
+        State.return (x' :: xs') in
+  let (new_instructions, (final_offset, _)) =
+    State.run (map_from_left asm_pseudo_func.body ~f:replace_step) init in
+  let new_instructions_fixed = List.concat_map new_instructions ~f:fix_instruction in
+  let add_allocate_stack =
+    if final_offset = 0
+    then Fn.id
+    else fun instrs -> AllocateStack final_offset :: instrs in
+  { asm_pseudo_func with body = add_allocate_stack new_instructions_fixed }
+
+let translate_program (tacky_prog : Asm.program) =
+  { Asm.funcs = translate_function tacky_prog.funcs }
+
+end
+
+let print_asm_instructions instr_list =
+  List.iter instr_list ~f:(fun instr -> print_s ([%sexp_of : Asm.instruction] instr))
+
+let convert_and_print_total_func (init_func : Ast.statement) =
+  let ast_func = Ast.{name = `Identifier "test"; body = init_func} in
+  let asm_stack_func =
+    Asm_pseudo_to_asm_stack.translate_function @@
+      Tacky_to_asm_pseudo.translate_function @@
+      Ast_to_tacky.translate_function ast_func in
+  print_asm_instructions Asm.(asm_stack_func.body)
+
+let%expect_test "return constant" =
+  convert_and_print_total_func @@ Ast.Return (`Constant 2);
+  [%expect {|
+    (Mov (Immediate 2) (Register AX))
+    Ret |}]
+
+let%expect_test "one unary" =
+  convert_and_print_total_func @@ Ast.Return (`Unary (`Complement, (`Constant 2)));
+  [%expect {|
+    (AllocateStack 4)
+    (Mov (Immediate 2) (Stack -4))
+    (Unary Not (Stack -4))
+    (Mov (Stack -4) (Register AX))
+    Ret |}]
+
+let%expect_test "one unary" =
+  convert_and_print_total_func @@ Ast.Return (`Unary (`Complement, (`Unary (`Negate, (`Constant 2)))));
+  [%expect {|
+    (AllocateStack 8)
+    (Mov (Immediate 2) (Stack -4))
+    (Unary Neg (Stack -4))
+    (Mov (Stack -4) (Register R10))
+    (Mov (Register R10) (Stack -8))
+    (Unary Not (Stack -8))
+    (Mov (Stack -8) (Register AX))
+    Ret |}]
