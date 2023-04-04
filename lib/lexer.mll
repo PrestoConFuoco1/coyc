@@ -44,5 +44,7 @@ rule read =
   | "&&"     { AND }
   | "||"     { OR }
 
+  | '='      { ASSIGNMENT }
+
   | _ { raise (SyntaxError ("Unexpected char: " ^ Lexing.lexeme lexbuf)) }
   | eof      { EOF }

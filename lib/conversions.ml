@@ -1,6 +1,8 @@
 open Base
 open Stdio
 
+let undefined = failwith ""
+
 (* ast to asm *)
 
 (*
@@ -25,7 +27,17 @@ let translate_program ast_prog =
 end
 *)
 
-(* let undefined = failwith "" *)
+module State = Monads.Std.Monad.State
+
+let rec map_from_left lst ~f : ('b list, 'c) State.t =
+    match lst with
+    | [] -> State.return []
+    | x :: xs ->
+        let open State.Let_syntax in
+        let%bind x' = f x in
+        let%bind xs' = map_from_left xs ~f in
+        State.return (x' :: xs')
+
 
 let label_counter = ref 0
 
@@ -51,17 +63,8 @@ let mk_fresh_var () : string =
   let var_name = List.random_element_exn var_name_list in
   var_name ^ Int.to_string rand_int
 
-let rec translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list * Tacky.value) =
-  match ast_expr with
-  | `Constant const -> ([], `Constant const)
-  | `Unary (unop, expr) ->
-      let (instrs, val_) = translate_expression expr in
-      let new_var = `Var (`Identifier (mk_fresh_var ())) in
-      let assign = `Unary (unop, val_, new_var) in
-      (instrs @ [assign], new_var)
-  | `Binary (binop, expr1, expr2) ->
-      match binop with
-      | `And ->
+
+let rec translate_and_expression expr1 expr2 =
         let (instrs1, val1) = translate_expression expr1 in
         let (instrs2, val2) = translate_expression expr2 in
         let false_label = `Identifier (mk_fresh_false_label ()) in
@@ -79,8 +82,8 @@ let rec translate_expression (ast_expr : Ast.expression) : (Tacky.instruction li
         ; `Label end_label]
         ], result_var)
 
-      | `Or ->
-        let (instrs1, val1) = translate_expression expr1 in
+and translate_or_expression expr1 expr2 =
+  let (instrs1, val1) = translate_expression expr1 in
         let (instrs2, val2) = translate_expression expr2 in
         let true_label = `Identifier (mk_fresh_true_label ()) in
         let end_label = `Identifier (mk_fresh_end_label ()) in
@@ -97,6 +100,18 @@ let rec translate_expression (ast_expr : Ast.expression) : (Tacky.instruction li
         ; `Label end_label]
         ], result_var)
 
+and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list * Tacky.value) =
+  match ast_expr with
+  | `Constant const -> ([], `Constant const)
+  | `Unary (unop, expr) ->
+      let (instrs, val_) = translate_expression expr in
+      let new_var = `Var (`Identifier (mk_fresh_var ())) in
+      let assign = `Unary (unop, val_, new_var) in
+      (instrs @ [assign], new_var)
+  | `Binary (binop, expr1, expr2) ->
+      (match binop with
+      | `And -> translate_and_expression expr1 expr2
+      | `Or -> translate_or_expression expr1 expr2
       | (`Equal | `NotEqual | `LesserThan | `LesserOrEqual |
          `GreaterThan | `GreaterOrEqual |
          `Add | `Subtract | `Multiply | `Divide | `Mod as binop_) ->
@@ -104,20 +119,24 @@ let rec translate_expression (ast_expr : Ast.expression) : (Tacky.instruction li
         let (instrs2, val2) = translate_expression expr2 in
         let new_var = `Var (`Identifier (mk_fresh_var ())) in
         let assign = `Binary (binop_, val1, val2, new_var) in
-        (List.concat [instrs1; instrs2; [assign]], new_var)
+        (List.concat [instrs1; instrs2; [assign]], new_var))
+  | `Assign _ -> undefined
+  | `Var _ -> undefined
 
-let translate_statement (ast_stmt : Ast.statement) : Tacky.instruction list =
-  let handle_expr expr =
-    let (instrs, final_val) = translate_expression expr in
-    (instrs :> Tacky.instruction list) @ [ `Return final_val] in
-
-  match ast_stmt with
-  | Return (`Constant const) -> [`Return (`Constant const)]
-  | Return (`Unary _ as expr) -> handle_expr expr
-  | Return (`Binary _ as expr) -> handle_expr expr
+let translate_statement (ast_stmt : Ast.statement) : (Tacky.instruction list, unit) State.t =
+  State.return @@ match ast_stmt with
+  | `Declare (_identifier, _opt_expr) -> undefined
+  | `Expression expr ->
+      let (instrs, _) = translate_expression expr in
+      instrs
+  | `Return expr ->
+      let (instrs, final_val) = translate_expression expr in
+      instrs @ [ `Return final_val ]
 
 let translate_function ast_func =
-  Ast.{Tacky.name = ast_func.name; Tacky.body = translate_statement ast_func.body}
+  { Tacky.name = ast_func.Ast.name
+  ; Tacky.body = List.concat (State.eval
+      (map_from_left ~f:translate_statement ast_func.body) ())}
 
 let translate_program ast_prog =
   {Tacky.funcs = translate_function Ast.(ast_prog.funcs)}
@@ -128,24 +147,24 @@ let print_tacky_instructions instr_list =
   List.iter instr_list ~f:(fun instr -> print_s ([%sexp_of : Tacky.instruction] instr))
 
 let convert_and_print init_stmt =
-  let tacky = Ast_to_tacky.translate_statement init_stmt in
+  let tacky = State.eval (Ast_to_tacky.translate_statement init_stmt) () in
   print_tacky_instructions tacky
 
 (* These test seem to be reproducible because the global pseudo-random generator
  * is always initialised with the same value
  *)
 let%expect_test "return constant" =
-  convert_and_print @@ Ast.Return (`Constant 2);
+  convert_and_print @@ `Return (`Constant 2);
   [%expect {| (Return (Constant 2)) |}]
 
 let%expect_test "one unary" =
-  convert_and_print @@ Ast.Return (`Unary (`Complement, (`Constant 2)));
+  convert_and_print @@ `Return (`Unary (`Complement, (`Constant 2)));
   [%expect {|
     (Unary (Complement (Constant 2) (Var (Identifier goat0))))
     (Return (Var (Identifier goat0))) |}]
 
 let%expect_test "one unary" =
-  convert_and_print @@ Ast.Return (`Unary (`Complement, (`Unary (`Negate, (`Constant 2)))));
+  convert_and_print @@ `Return (`Unary (`Complement, (`Unary (`Negate, (`Constant 2)))));
   [%expect {|
     (Unary (Negate (Constant 2) (Var (Identifier goat1))))
     (Unary (Complement (Var (Identifier goat1)) (Var (Identifier koala2))))
@@ -241,8 +260,6 @@ module Asm_pseudo_to_asm_stack = struct
 
 open Asm
 
-module State = Monads.Std.Monad.State
-
 type accum = int * (string, int, Base.String.comparator_witness) Base.Map.t
 
 let replace_operand (asm_pseudo_opd : operand) : (operand, accum) State.t =
@@ -334,14 +351,6 @@ let fix_instruction asm_pseudo_instr : Asm.instruction list =
 
 let translate_function asm_pseudo_func =
   let init = ((0, Map.empty (module String)) : accum) in
-  let rec map_from_left lst ~f : ('b list, 'c) State.t =
-    match lst with
-    | [] -> State.return []
-    | x :: xs ->
-        let open State.Let_syntax in
-        let%bind x' = f x in
-        let%bind xs' = map_from_left xs ~f in
-        State.return (x' :: xs') in
   let (new_instructions, (final_offset, _)) =
     State.run (map_from_left asm_pseudo_func.body ~f:replace_step) init in
   let new_instructions_fixed = List.concat_map new_instructions ~f:fix_instruction in
@@ -360,7 +369,7 @@ let print_asm_instructions instr_list =
   List.iter instr_list ~f:(fun instr -> print_s ([%sexp_of : Asm.instruction] instr))
 
 let convert_and_print_total_func (init_func : Ast.statement) =
-  let ast_func = Ast.{name = `Identifier "test"; body = init_func} in
+  let ast_func = Ast.{name = `Identifier "test"; body = [init_func]} in
   let asm_stack_func =
     Asm_pseudo_to_asm_stack.translate_function @@
       Tacky_to_asm_pseudo.translate_function @@
@@ -368,13 +377,13 @@ let convert_and_print_total_func (init_func : Ast.statement) =
   print_asm_instructions Asm.(asm_stack_func.body)
 
 let%expect_test "return constant" =
-  convert_and_print_total_func @@ Ast.Return (`Constant 2);
+  convert_and_print_total_func @@ `Return (`Constant 2);
   [%expect {|
     (Mov (Immediate 2) (Register AX))
     Ret |}]
 
 let%expect_test "one unary" =
-  convert_and_print_total_func @@ Ast.Return (`Unary (`Complement, (`Constant 2)));
+  convert_and_print_total_func @@ `Return (`Unary (`Complement, (`Constant 2)));
   [%expect {|
     (AllocateStack 4)
     (Mov (Immediate 2) (Stack -4))
@@ -383,7 +392,7 @@ let%expect_test "one unary" =
     Ret |}]
 
 let%expect_test "one unary" =
-  convert_and_print_total_func @@ Ast.Return (`Unary (`Complement, (`Unary (`Negate, (`Constant 2)))));
+  convert_and_print_total_func @@ `Return (`Unary (`Complement, (`Unary (`Negate, (`Constant 2)))));
   [%expect {|
     (AllocateStack 8)
     (Mov (Immediate 2) (Stack -4))

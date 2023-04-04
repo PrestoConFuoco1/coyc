@@ -27,6 +27,8 @@
 %token AND
 %token OR
 
+%token ASSIGNMENT
+
 %left OR
 %left AND
 %left EQUAL NOT_EQUAL
@@ -45,13 +47,17 @@ prog:
 
 function_definition:
   INT_KW; name = IDENTIFIER; PAREN_OPEN; PAREN_CLOSE;
-    BRACE_OPEN; body = statement; BRACE_CLOSE
+    BRACE_OPEN; body = list(statement); BRACE_CLOSE
       {
         {Ast.funcs = {Ast.name = `Identifier name; body}}
       };
 
 statement:
-  | RETURN_KW; e = expression; SEMICOLON { Ast.Return e };
+  | RETURN_KW; e = expression; SEMICOLON { `Return e }
+  | e = expression; SEMICOLON { `Expression e }
+  | INT_KW; name = IDENTIFIER;
+      opt_init = option(ASSIGNMENT; e = expression { e })
+      { `Declare (`Identifier name, opt_init) }
 
 expression:
   | const = CONSTANT
@@ -76,6 +82,8 @@ expression:
 
   | e1 = expression; AND; e2 = expression { `Binary (`And, e1, e2) }
   | e1 = expression; OR; e2 = expression { `Binary (`Or, e1, e2) }
+  | var = IDENTIFIER; ASSIGNMENT; e = expression { `Assign (`Identifier var, e) }
+  | var = IDENTIFIER { `Var (`Identifier var) }
 
 unop:
   | DECREMENT { failwith "not implemented" }
