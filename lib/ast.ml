@@ -10,6 +10,7 @@ type ast = [
 type unary_operator =
   [ `Complement
   | `Negate
+  | `Not
   ]
   [@@deriving sexp]
 
@@ -20,7 +21,7 @@ type logical_binary_operator =
   | `NotEqual
   | `LesserThan
   | `LesserOrEqual
-  | `GreaterThen
+  | `GreaterThan
   | `GreaterOrEqual
   ]
   [@@deriving sexp]

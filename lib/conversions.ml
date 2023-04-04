@@ -25,6 +25,27 @@ let translate_program ast_prog =
 end
 *)
 
+(* let undefined = failwith "" *)
+
+let label_counter = ref 0
+
+let get_new_label_idx () =
+  let res = !label_counter in
+  Int.incr label_counter;
+  res
+
+let mk_fresh_false_label () =
+  let n = get_new_label_idx () in
+  "false_label" ^ Int.to_string n
+
+let mk_fresh_true_label () =
+  let n = get_new_label_idx () in
+  "true_label" ^ Int.to_string n
+
+let mk_fresh_end_label () =
+  let n = get_new_label_idx () in
+  "end" ^ Int.to_string n
+
 module Ast_to_tacky = struct
 
 (* use this to make sure that all names in tacky are globally unique *)
@@ -37,7 +58,8 @@ let mk_fresh_var () : string =
   let var_name = List.random_element_exn var_name_list in
   var_name ^ Int.to_string rand_int
 
-let rec translate_expression (ast_expr : Ast.expression) : (Tacky.assignment list * Tacky.value) =
+
+let rec translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list * Tacky.value) =
   match ast_expr with
   | `Constant const -> ([], `Constant const)
   | `Unary (unop, expr) ->
@@ -46,11 +68,51 @@ let rec translate_expression (ast_expr : Ast.expression) : (Tacky.assignment lis
       let assign = `Unary (unop, val_, new_var) in
       (instrs @ [assign], new_var)
   | `Binary (binop, expr1, expr2) ->
-      let (instrs1, val1) = translate_expression expr1 in
-      let (instrs2, val2) = translate_expression expr2 in
-      let new_var = `Var (`Identifier (mk_fresh_var ())) in
-      let assign = `Binary (binop, val1, val2, new_var) in
-      (List.concat [instrs1; instrs2; [assign]], new_var)
+      match binop with
+      | `And ->
+        let (instrs1, val1) = translate_expression expr1 in
+        let (instrs2, val2) = translate_expression expr2 in
+        let false_label = `Identifier (mk_fresh_false_label ()) in
+        let end_label = `Identifier (mk_fresh_end_label ()) in
+        let result_var = `Var (`Identifier (mk_fresh_var ())) in
+        (List.concat
+        [ instrs1
+        ; [`JumpIfZero (val1, false_label)]
+        ; instrs2
+        ; [`JumpIfZero (val2, false_label)
+        ; `Copy (`Constant 1, result_var)
+        ; `Jump end_label
+        ; `Label false_label
+        ; `Copy (`Constant 0, result_var)
+        ; `Label end_label]
+        ], result_var)
+
+      | `Or ->
+        let (instrs1, val1) = translate_expression expr1 in
+        let (instrs2, val2) = translate_expression expr2 in
+        let true_label = `Identifier (mk_fresh_true_label ()) in
+        let end_label = `Identifier (mk_fresh_end_label ()) in
+        let result_var = `Var (`Identifier (mk_fresh_var ())) in
+        (List.concat
+        [ instrs1
+        ; [`JumpIfNotZero (val1, true_label)]
+        ; instrs2
+        ; [`JumpIfNotZero (val2, true_label)
+        ; `Copy (`Constant 0, result_var)
+        ; `Jump end_label
+        ; `Label true_label
+        ; `Copy (`Constant 1, result_var)
+        ; `Label end_label]
+        ], result_var)
+
+      | (`Equal | `NotEqual | `LesserThan | `LesserOrEqual |
+         `GreaterThan | `GreaterOrEqual |
+         `Add | `Subtract | `Multiply | `Divide | `Mod as binop_) ->
+        let (instrs1, val1) = translate_expression expr1 in
+        let (instrs2, val2) = translate_expression expr2 in
+        let new_var = `Var (`Identifier (mk_fresh_var ())) in
+        let assign = `Binary (binop_, val1, val2, new_var) in
+        (List.concat [instrs1; instrs2; [assign]], new_var)
 
 let translate_statement (ast_stmt : Ast.statement) : Tacky.instruction list =
   let handle_expr expr =
@@ -104,11 +166,6 @@ let value_to_operand (tacky_value : Tacky.value) =
   | `Constant const -> Asm.Immediate const
   | `Var identifier -> Asm.Pseudo identifier
 
-let translate_unop (tacky_unop : Tacky.unary_operator) =
-  match tacky_unop with
-  | `Complement -> Asm.Not
-  | `Negate -> Neg
-
 let translate_instruction (tacky_instr : Tacky.instruction) =
   match tacky_instr with
   | `Return val_ -> [Asm.Mov (value_to_operand val_, Register AX); Ret]
@@ -116,8 +173,17 @@ let translate_instruction (tacky_instr : Tacky.instruction) =
       let out_operand = value_to_operand out_var in
       (* Here out_operand is always a variable *)
       let in_operand = value_to_operand in_var in
-      let asm_op = translate_unop unop in
-      [Asm.Mov (in_operand, out_operand); Unary (asm_op, out_operand)]
+      let handle_simple_unop asm_op =
+        [Asm.Mov (in_operand, out_operand); Unary (asm_op, out_operand)] in
+      (match unop with
+      | `Complement -> handle_simple_unop Asm.Not
+      | `Negate -> handle_simple_unop Neg
+      | `Not ->
+          [ Asm.Cmp (Immediate 0, in_operand)
+          ; Mov (Immediate 0, out_operand)
+          ; SetCC (E, out_operand)
+          ])
+
   | `Binary (binop, in1_var, in2_var, out_var) ->
       let in1_op = value_to_operand in1_var in
       let in2_op = value_to_operand in2_var in
@@ -127,7 +193,7 @@ let translate_instruction (tacky_instr : Tacky.instruction) =
         ; Asm.Binary (asm_op, in2_op, out_op)
         ] in
 
-      match binop with
+      (match binop with
       | `Add -> handle_simple_operation Asm.Add
       | `Subtract -> handle_simple_operation Asm.Sub
       | `Multiply -> handle_simple_operation Asm.IMul
@@ -141,6 +207,35 @@ let translate_instruction (tacky_instr : Tacky.instruction) =
           ; IDiv in2_op
           ; Mov (Register resulting_register, out_op)
           ]
+      | (`LesserThan | `LesserOrEqual | `GreaterThan | `GreaterOrEqual | `Equal | `NotEqual) as binop_ ->
+          let condition =
+            match binop_ with
+            | `LesserThan -> Asm.L
+            | `LesserOrEqual -> LE
+            | `GreaterThan -> G
+            | `GreaterOrEqual -> GE
+            | `Equal -> E
+            | `NotEqual -> NE in
+          [ Cmp (in2_op, in1_op)
+          ; Mov (Immediate 0, out_op) (* mov doesn't change rflags*)
+          ; SetCC (condition, out_op) (* Later we'll replace 32-registers with 8 ones *)
+          ])
+  | `Copy (in_var, out_var) ->
+      let in_op = value_to_operand in_var in
+      let out_op = value_to_operand out_var in
+      [Mov (in_op, out_op)]
+  | `Jump label -> [Jmp label]
+  | (`JumpIfZero (val_, label) | `JumpIfNotZero (val_, label)) as instr ->
+      let condition =
+        match instr with
+        | `JumpIfZero _ -> Asm.E
+        | `JumpIfNotZero _ -> NE in
+      let val_op = value_to_operand val_ in
+      [ Asm.Cmp (Asm.Immediate 0, val_op)
+      ; JmpCC (condition, label)
+      ]
+  | `Label label -> [Asm.Label label]
+
 
 let translate_function tacky_func =
   Tacky.{Asm.name = tacky_func.name; Asm.body = List.concat_map ~f:translate_instruction tacky_func.body}
@@ -149,8 +244,6 @@ let translate_program (tacky_prog : Tacky.program) =
   { Asm.funcs = translate_function tacky_prog.funcs }
 
 end
-
-(* let undefined = failwith *)
 
 module Asm_pseudo_to_asm_stack = struct
 
@@ -196,11 +289,19 @@ let replace_step instr =
       State.map ~f:(fun x -> Unary (unop, x)) (replace_operand op)
   | Binary (binop, op1, op2) -> 
       State.(!$$) (fun x y -> Binary (binop, x, y)) (replace_operand op1) (replace_operand op2)
+  | Cmp (op1, op2) ->
+      let cmp_constr = fun x1 x2 -> Cmp (x1, x2) in
+      (State.(!$$)) cmp_constr (replace_operand op1) (replace_operand op2)
   | IDiv op -> State.map ~f:(fun x -> IDiv x) (replace_operand op)
+  | SetCC (cond, op) ->
+      State.map ~f:(fun x -> SetCC (cond, x)) (replace_operand op)
   | AllocateStack _offset ->
       failwith "there shouldn't be any stack related instructions before this step"
-  | (Ret | Cdq) as const_instr -> State.return const_instr
+  | (Ret | Cdq | Jmp _ | JmpCC _ | Label _) as const_instr -> State.return const_instr
 
+(* (Cmp (_, _)|Jmp _|JmpCC (_, _)|SetCC (_, _)|Label _) *)
+
+(* We use R10 to fix the first operand and R11 to fix the second one *)
 let fix_instruction asm_pseudo_instr : Asm.instruction list =
   match asm_pseudo_instr with
 (*   | Mov (Stack _ as op1, Stack _ as op2) -> [Mov (op1, Register R10); Mov (Register R10, op2)] *)
@@ -208,6 +309,8 @@ let fix_instruction asm_pseudo_instr : Asm.instruction list =
       [ Mov (op1, Register R10)
       ; Mov (Register R10, op2)
       ]
+  | Mov _ -> List.return asm_pseudo_instr
+
   | Binary ((Add | Sub) as binop, (Stack _ as op1), (Stack _ as op2)) ->
       [ Mov (op1, Register R10)
       ; Binary (binop, Register R10, op2)
@@ -218,11 +321,26 @@ let fix_instruction asm_pseudo_instr : Asm.instruction list =
       ; Binary (IMul, op1, Register R11)
       ; Mov (Register R11, op2)
       ]
+  | Binary _ ->  List.return asm_pseudo_instr
+
   | IDiv (Immediate _ as op) ->
       [ Mov (op, Register R10)
       ; IDiv (Register R10)
       ]
-  | Mov _ | Binary _ | Unary _ | AllocateStack _ | Ret | IDiv _ | Cdq -> List.return asm_pseudo_instr
+  | IDiv _ -> List.return asm_pseudo_instr
+
+  | Cmp ((Stack _ as op1), (Stack _ as op2)) ->
+      [ Mov (op1, Register R10)
+      ; Cmp (Register R10, op2)
+      ]
+  | Cmp (op1, (Immediate _ as op2)) ->
+      [ Mov (op2, Register R11)
+      ; Cmp (op1, Register R11)
+      ]
+  | Cmp _ -> List.return asm_pseudo_instr
+
+  | Unary _ | AllocateStack _ | Ret | Cdq
+  | Jmp _ | JmpCC _ | SetCC _ | Label _ -> List.return asm_pseudo_instr
 
 let translate_function asm_pseudo_func =
   let init = ((0, Map.empty (module String)) : accum) in

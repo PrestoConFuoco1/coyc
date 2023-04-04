@@ -27,6 +27,10 @@
 %token AND
 %token OR
 
+%left OR
+%left AND
+%left EQUAL NOT_EQUAL
+%left LESSER LESSER_OR_EQUAL GREATER GREATER_OR_EQUAL
 %left PLUS MINUS        /* lowest precedence */
 %left TIMES DIV MOD     /* medium precedence */
 %nonassoc UMINUS
@@ -62,7 +66,19 @@ expression:
   | e1 = expression; DIV; e2 = expression { `Binary (`Divide, e1, e2) }
   | e1 = expression; MOD; e2 = expression { `Binary (`Mod, e1, e2) }
 
+  | e1 = expression; LESSER; e2 = expression { `Binary (`LesserThan, e1, e2) }
+  | e1 = expression; LESSER_OR_EQUAL; e2 = expression { `Binary (`LesserOrEqual, e1, e2) }
+  | e1 = expression; GREATER; e2 = expression { `Binary (`GreaterThan, e1, e2) }
+  | e1 = expression; GREATER_OR_EQUAL; e2 = expression { `Binary (`GreaterOrEqual, e1, e2) }
+
+  | e1 = expression; EQUAL; e2 = expression { `Binary (`Equal, e1, e2) }
+  | e1 = expression; NOT_EQUAL; e2 = expression { `Binary (`NotEqual, e1, e2) }
+
+  | e1 = expression; AND; e2 = expression { `Binary (`And, e1, e2) }
+  | e1 = expression; OR; e2 = expression { `Binary (`Or, e1, e2) }
+
 unop:
   | DECREMENT { failwith "not implemented" }
   | MINUS { `Negate }
   | COMPLEMENT { `Complement }
+  | NOT { `Not }

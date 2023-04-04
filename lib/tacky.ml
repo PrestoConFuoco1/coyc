@@ -6,15 +6,32 @@ type identifier = [ `Identifier of string ]
 type unary_operator =
   [ `Complement 
   | `Negate
+  | `Not
   ]
   [@@deriving sexp]
 
-type binary_operator =
+type logical_binary_operator =
+  [ `Equal
+  | `NotEqual
+  | `LesserThan
+  | `LesserOrEqual
+  | `GreaterThan
+  | `GreaterOrEqual
+  ]
+  [@@deriving sexp]
+
+type arith_binary_operator =
   [ `Add
   | `Subtract
   | `Multiply
   | `Divide
   | `Mod
+  ]
+  [@@deriving sexp]
+
+type binary_operator =
+  [ logical_binary_operator
+  | arith_binary_operator
   ]
   [@@deriving sexp]
 
@@ -24,15 +41,15 @@ type value =
   ]
   [@@deriving sexp]
 
-type assignment = 
-  [ `Unary of (unary_operator * value * value) (* first is source, second is dest *)
-  | `Binary of (binary_operator * value * value * value)
-  ]
-  [@@deriving sexp]
-
 type instruction =
   [ `Return of value
-  | assignment
+  | `Unary of (unary_operator * value * value) (* first is source, second is dest *)
+  | `Binary of (binary_operator * value * value * value)
+  | `Copy of (value * value)
+  | `Jump of identifier
+  | `JumpIfZero of (value * identifier)
+  | `JumpIfNotZero of (value * identifier)
+  | `Label of identifier
   ]
   [@@deriving sexp]
 

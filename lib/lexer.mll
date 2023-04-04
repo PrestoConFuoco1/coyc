@@ -33,6 +33,7 @@ rule read =
   | '*'      { TIMES }
   | '%'      { MOD }
   | '~'      { COMPLEMENT }
+  | '!'      { NOT }
 
   | "=="     { EQUAL }
   | "!="     { NOT_EQUAL }
@@ -40,9 +41,8 @@ rule read =
   | ">="     { GREATER_OR_EQUAL }
   | '<'      { LESSER }
   | '>'      { GREATER }
-  | '!'      { NOT }
   | "&&"     { AND }
   | "||"     { OR }
-  |
+
   | _ { raise (SyntaxError ("Unexpected char: " ^ Lexing.lexeme lexbuf)) }
   | eof      { EOF }
