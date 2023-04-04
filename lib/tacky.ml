@@ -38,6 +38,7 @@ type binary_operator =
 type value =
   [ `Constant of int
   | `Var of identifier
+  | `UserVar of identifier
   ]
   [@@deriving sexp]
 

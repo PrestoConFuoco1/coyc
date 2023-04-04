@@ -56,7 +56,7 @@ statement:
   | RETURN_KW; e = expression; SEMICOLON { `Return e }
   | e = expression; SEMICOLON { `Expression e }
   | INT_KW; name = IDENTIFIER;
-      opt_init = option(ASSIGNMENT; e = expression { e })
+      opt_init = option(ASSIGNMENT; e = expression { e }); SEMICOLON
       { `Declare (`Identifier name, opt_init) }
 
 expression:
@@ -82,7 +82,7 @@ expression:
 
   | e1 = expression; AND; e2 = expression { `Binary (`And, e1, e2) }
   | e1 = expression; OR; e2 = expression { `Binary (`Or, e1, e2) }
-  | var = IDENTIFIER; ASSIGNMENT; e = expression { `Assign (`Identifier var, e) }
+  | var = IDENTIFIER; ASSIGNMENT; e = expression { `Assign (`Identifier var, e) } %prec UMINUS
   | var = IDENTIFIER { `Var (`Identifier var) }
 
 unop:

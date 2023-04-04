@@ -1,8 +1,6 @@
 open Base
 open Stdio
 
-let undefined = failwith ""
-
 (* ast to asm *)
 
 (*
@@ -26,6 +24,8 @@ let translate_program ast_prog =
 
 end
 *)
+
+let get_identifier (`Identifier id) : string = id
 
 module State = Monads.Std.Monad.State
 
@@ -56,6 +56,8 @@ let mk_fresh_end_label = mk_fresh_label "end"
 
 module Ast_to_tacky = struct
 
+type accum = (string, Base.String.comparator_witness) Base.Set.t
+
 let var_name_list = ["camel"; "tiger"; "koala"; "rat"; "goat"]
 
 let mk_fresh_var () : string =
@@ -63,14 +65,14 @@ let mk_fresh_var () : string =
   let var_name = List.random_element_exn var_name_list in
   var_name ^ Int.to_string rand_int
 
-
-let rec translate_and_expression expr1 expr2 =
-        let (instrs1, val1) = translate_expression expr1 in
-        let (instrs2, val2) = translate_expression expr2 in
-        let false_label = `Identifier (mk_fresh_false_label ()) in
-        let end_label = `Identifier (mk_fresh_end_label ()) in
-        let result_var = `Var (`Identifier (mk_fresh_var ())) in
-        (List.concat
+let rec translate_and_expression expr1 expr2 : (Tacky.instruction list * Tacky.value, accum) State.t =
+  let open State.Let_syntax in
+  let%bind (instrs1, val1) = translate_expression expr1 in
+  let%bind (instrs2, val2) = translate_expression expr2 in
+  let false_label = `Identifier (mk_fresh_false_label ()) in
+  let end_label = `Identifier (mk_fresh_end_label ()) in
+  let result_var = `Var (`Identifier (mk_fresh_var ())) in
+  State.return (List.concat
         [ instrs1
         ; [`JumpIfZero (val1, false_label)]
         ; instrs2
@@ -82,13 +84,14 @@ let rec translate_and_expression expr1 expr2 =
         ; `Label end_label]
         ], result_var)
 
-and translate_or_expression expr1 expr2 =
-  let (instrs1, val1) = translate_expression expr1 in
-        let (instrs2, val2) = translate_expression expr2 in
-        let true_label = `Identifier (mk_fresh_true_label ()) in
-        let end_label = `Identifier (mk_fresh_end_label ()) in
-        let result_var = `Var (`Identifier (mk_fresh_var ())) in
-        (List.concat
+and translate_or_expression expr1 expr2 : (Tacky.instruction list * Tacky.value, accum) State.t =
+  let open State.Let_syntax in
+  let%bind (instrs1, val1) = translate_expression expr1 in
+  let%bind (instrs2, val2) = translate_expression expr2 in
+  let true_label = `Identifier (mk_fresh_true_label ()) in
+  let end_label = `Identifier (mk_fresh_end_label ()) in
+  let result_var = `Var (`Identifier (mk_fresh_var ())) in
+  State.return (List.concat
         [ instrs1
         ; [`JumpIfNotZero (val1, true_label)]
         ; instrs2
@@ -100,14 +103,22 @@ and translate_or_expression expr1 expr2 =
         ; `Label end_label]
         ], result_var)
 
-and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list * Tacky.value) =
+and check_variable_exists (`Identifier var_name) : (bool, accum) State.t =
+  let open State.Let_syntax in
+  let%bind var_set = State.get () in
+  State.return (Set.mem var_set var_name)
+
+and report_unknown_user_var (`Identifier id) = failwith ("Variable doesn't exist: " ^ id)
+
+and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list * Tacky.value, accum) State.t =
+  let open State.Let_syntax in
   match ast_expr with
-  | `Constant const -> ([], `Constant const)
+  | `Constant const -> State.return ([], `Constant const)
   | `Unary (unop, expr) ->
-      let (instrs, val_) = translate_expression expr in
+      let%bind (instrs, val_) = translate_expression expr in
       let new_var = `Var (`Identifier (mk_fresh_var ())) in
       let assign = `Unary (unop, val_, new_var) in
-      (instrs @ [assign], new_var)
+      State.return (instrs @ [assign], new_var)
   | `Binary (binop, expr1, expr2) ->
       (match binop with
       | `And -> translate_and_expression expr1 expr2
@@ -115,28 +126,60 @@ and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list *
       | (`Equal | `NotEqual | `LesserThan | `LesserOrEqual |
          `GreaterThan | `GreaterOrEqual |
          `Add | `Subtract | `Multiply | `Divide | `Mod as binop_) ->
-        let (instrs1, val1) = translate_expression expr1 in
-        let (instrs2, val2) = translate_expression expr2 in
+        let%bind (instrs1, val1) = translate_expression expr1 in
+        let%bind (instrs2, val2) = translate_expression expr2 in
         let new_var = `Var (`Identifier (mk_fresh_var ())) in
         let assign = `Binary (binop_, val1, val2, new_var) in
-        (List.concat [instrs1; instrs2; [assign]], new_var))
-  | `Assign _ -> undefined
-  | `Var _ -> undefined
+        State.return (List.concat [instrs1; instrs2; [assign]], new_var))
+  | `Assign (var, expr) ->
+      let%bind exists = check_variable_exists var in
+      (if not exists then report_unknown_user_var var);
+      let%bind (instrs, val_) = translate_expression expr in
+      let user_var = `UserVar var in
+      State.return (instrs @ [`Copy (val_, user_var)], user_var)
+  | `Var var ->
+      let%bind exists = check_variable_exists var in
+      (if not exists then report_unknown_user_var var);
+      State.return ([], `UserVar var)
 
-let translate_statement (ast_stmt : Ast.statement) : (Tacky.instruction list, unit) State.t =
-  State.return @@ match ast_stmt with
-  | `Declare (_identifier, _opt_expr) -> undefined
+let insert_new_user_var (`Identifier identifier) : (unit, accum) State.t =
+  State.update (Fn.flip Set.add identifier)
+
+let report_variable_already_exists (`Identifier id) = failwith ("Variable already exists: " ^ id)
+
+let translate_statement (ast_stmt : Ast.statement) : (Tacky.instruction list, accum) State.t =
+  let open State.Let_syntax in
+  match ast_stmt with
+  | `Declare (identifier, opt_expr) ->
+      let%bind (init_instrs, init_val) = match opt_expr with
+      | None -> State.return ([], `Constant 0)
+      | Some expr -> translate_expression expr in
+(*       let%bind var_exists = State.gets (Fn.flip Set.mem identifier) in *)
+      let%bind var_exists = check_variable_exists identifier in
+      if var_exists
+      then report_variable_already_exists identifier
+      else
+        let%bind () = insert_new_user_var identifier in
+        State.return (init_instrs @ [`Copy (init_val, `UserVar identifier)])
   | `Expression expr ->
-      let (instrs, _) = translate_expression expr in
-      instrs
+      let%bind (instrs, _) = translate_expression expr in
+      State.return instrs
   | `Return expr ->
-      let (instrs, final_val) = translate_expression expr in
-      instrs @ [ `Return final_val ]
+      let%bind (instrs, final_val) = translate_expression expr in
+      State.return (instrs @ [ `Return final_val ])
 
 let translate_function ast_func =
+  let empty_var_map = Set.empty (module String) in
   { Tacky.name = ast_func.Ast.name
-  ; Tacky.body = List.concat (State.eval
-      (map_from_left ~f:translate_statement ast_func.body) ())}
+  ; Tacky.body =
+      let instrs = List.concat (State.eval (map_from_left
+        ~f:translate_statement ast_func.body) empty_var_map) in
+      (* TODO: this is very dumb *)
+      let has_return = match List.last instrs with | Some (`Return _) -> true | _ -> false in
+      if has_return
+      then instrs
+      else instrs @ [`Return (`Constant 0)]
+  }
 
 let translate_program ast_prog =
   {Tacky.funcs = translate_function Ast.(ast_prog.funcs)}
@@ -147,7 +190,8 @@ let print_tacky_instructions instr_list =
   List.iter instr_list ~f:(fun instr -> print_s ([%sexp_of : Tacky.instruction] instr))
 
 let convert_and_print init_stmt =
-  let tacky = State.eval (Ast_to_tacky.translate_statement init_stmt) () in
+  let empty_var_map = Set.empty (module String) in
+  let tacky = State.eval (Ast_to_tacky.translate_statement init_stmt) empty_var_map in
   print_tacky_instructions tacky
 
 (* These test seem to be reproducible because the global pseudo-random generator
@@ -176,6 +220,8 @@ let value_to_operand (tacky_value : Tacky.value) =
   match tacky_value with
   | `Constant const -> Asm.Immediate const
   | `Var identifier -> Asm.Pseudo identifier
+  (* TODO: !!! separate namespaces! *)
+  | `UserVar identifier -> Asm.Pseudo identifier
 
 let translate_instruction (tacky_instr : Tacky.instruction) =
   match tacky_instr with
@@ -249,7 +295,10 @@ let translate_instruction (tacky_instr : Tacky.instruction) =
 
 
 let translate_function tacky_func =
-  Tacky.{Asm.name = tacky_func.name; Asm.body = List.concat_map ~f:translate_instruction tacky_func.body}
+  Tacky.
+  { Asm.name = tacky_func.name
+  ; Asm.body = List.concat_map ~f:translate_instruction tacky_func.body
+  }
 
 let translate_program (tacky_prog : Tacky.program) =
   { Asm.funcs = translate_function tacky_prog.funcs }
