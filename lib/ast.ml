@@ -1,12 +1,5 @@
 open Sexplib.Conv
 
-(*
-type ast = [
-  | `Constant of int
-  | `Identifier of string
-  ] [@@deriving sexp]
-*)
-
 type identifier = [ `Identifier of string ]
   [@@deriving sexp]
 
@@ -60,19 +53,29 @@ type expression =
   | `Binary of binary_operator * expression * expression
   | `Assign of identifier * expression
   | `Var of identifier
+  | `Ternary of (expression * expression * expression)
   ]
   [@@deriving sexp]
 
 type statement =
   [ `Return of expression
-  | `Declare of (identifier * expression option)
   | `Expression of expression
+  | `IfElse of (expression * statement * statement option)
+  ]
+  [@@deriving sexp]
+
+type declaration = [ `Declare of (identifier * expression option) ]
+  [@@deriving sexp]
+
+type block_item =
+  [ statement
+  | declaration
   ]
   [@@deriving sexp]
 
 type function_definition =
   { name : [`Identifier of string]
-  ; body : statement list
+  ; body : block_item list
   }
   [@@deriving sexp]
 
@@ -80,6 +83,3 @@ type program =
   { funcs : function_definition
   }
   [@@deriving sexp]
-
-(****************************************************)
-

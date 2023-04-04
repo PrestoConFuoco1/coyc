@@ -11,6 +11,8 @@ let identifier = ['a'-'z' 'A'-'Z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 let constant = ['0'-'9']+
 let int_k = "int"
 let return_k = "return"
+let if_k = "if"
+let else_k = "else"
 
 rule read =
   parse
@@ -18,6 +20,8 @@ rule read =
   | newline  { Lexing.new_line lexbuf; read lexbuf }
   | int_k    { INT_KW }
   | return_k { RETURN_KW }
+  | if_k     { IF_KW }
+  | else_k   { ELSE_KW }
   | constant { CONSTANT (int_of_string (Lexing.lexeme lexbuf)) }
   | identifier { IDENTIFIER (Lexing.lexeme lexbuf) }
   | '{'      { BRACE_OPEN }
@@ -44,6 +48,9 @@ rule read =
   | '>'      { GREATER }
   | "&&"     { AND }
   | "||"     { OR }
+
+  | ':'      { COLON }
+  | '?'      { QUESTION }
 
   | '='      { ASSIGNMENT }
 

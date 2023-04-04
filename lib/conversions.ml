@@ -53,6 +53,7 @@ let mk_fresh_label label () =
 let mk_fresh_false_label = mk_fresh_label "false_label"
 let mk_fresh_true_label = mk_fresh_label "true_label"
 let mk_fresh_end_label = mk_fresh_label "end"
+let mk_fresh_ifelse_false_label = mk_fresh_label "ifelse_false"
 
 module Ast_to_tacky = struct
 
@@ -150,15 +151,66 @@ and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list *
   | `Var var ->
       let%bind () = report_if_variable_doesn't_exist var in
       State.return ([], `UserVar var)
+  | `Ternary (cond_expr, true_expr, false_expr) ->
+      let%bind (cond_instrs, cond_val) = translate_expression cond_expr in
+      let new_var = `Var (`Identifier (mk_fresh_var ())) in
+      let%bind (t_instrs, true_val) = translate_expression true_expr in
+      let%bind (f_instrs, false_val) = translate_expression false_expr in
+      let false_label = `Identifier (mk_fresh_ifelse_false_label ()) in
+      let end_label = `Identifier (mk_fresh_end_label ()) in
+      State.return @@ (List.concat
+      [ cond_instrs
+      ; [`JumpIfZero (cond_val, false_label)]
+      ; t_instrs
+      ; [`Copy (true_val, new_var)]
+      ; [`Jump end_label]
+      ; [`Label false_label]
+      ; f_instrs
+      ; [`Copy (false_val, new_var)]
+      ; [`Label end_label]
+      ], new_var)
 
 let insert_new_user_var (`Identifier identifier) : (unit, accum) State.t =
   State.update (Fn.flip Set.add identifier)
 
 let report_variable_already_exists (`Identifier id) = failwith ("Variable already exists: " ^ id)
 
-let translate_statement (ast_stmt : Ast.statement) : (Tacky.instruction list, accum) State.t =
+let rec translate_statement (ast_stmt : Ast.statement) : (Tacky.instruction list, accum) State.t =
   let open State.Let_syntax in
   match ast_stmt with
+  | `Expression expr ->
+      let%bind (instrs, _) = translate_expression expr in
+      State.return instrs
+  | `IfElse (cond_expr, true_stmt, opt_false_stmt) ->
+      let%bind (cond_instrs, cond_val) = translate_expression cond_expr in
+      let%bind true_instrs = translate_statement true_stmt in
+      let end_label = `Identifier (mk_fresh_end_label ()) in
+      (match opt_false_stmt with
+      | None -> State.return @@ List.concat
+        [ cond_instrs
+        ; [`JumpIfZero (cond_val, end_label)]
+        ; true_instrs
+        ; [`Label end_label]
+        ]
+      | Some false_stmt ->
+        let%map false_instrs = translate_statement false_stmt in
+        let false_label = `Identifier (mk_fresh_ifelse_false_label ()) in
+        List.concat
+        [ cond_instrs
+        ; [`JumpIfZero (cond_val, false_label)]
+        ; true_instrs
+        ; [`Jump end_label]
+        ; [`Label false_label]
+        ; false_instrs
+        ; [`Label end_label]
+        ])
+  | `Return expr ->
+      let%bind (instrs, final_val) = translate_expression expr in
+      State.return (instrs @ [ `Return final_val ])
+
+let translate_block_item (ast_block_item : Ast.block_item) =
+  let open State.Let_syntax in
+  match ast_block_item with
   | `Declare (identifier, opt_expr) ->
       let%bind (init_instrs, init_val) = match opt_expr with
       | None -> State.return ([], `Constant 0)
@@ -170,19 +222,15 @@ let translate_statement (ast_stmt : Ast.statement) : (Tacky.instruction list, ac
       else
         let%bind () = insert_new_user_var identifier in
         State.return (init_instrs @ [`Copy (init_val, `UserVar identifier)])
-  | `Expression expr ->
-      let%bind (instrs, _) = translate_expression expr in
-      State.return instrs
-  | `Return expr ->
-      let%bind (instrs, final_val) = translate_expression expr in
-      State.return (instrs @ [ `Return final_val ])
+  | (`Return _ | `Expression _ | `IfElse _) as stmt -> translate_statement stmt
+
 
 let translate_function ast_func =
   let empty_var_map = Set.empty (module String) in
   { Tacky.name = ast_func.Ast.name
   ; Tacky.body =
       let instrs = List.concat (State.eval (map_from_left
-        ~f:translate_statement ast_func.body) empty_var_map) in
+        ~f:translate_block_item ast_func.body) empty_var_map) in
       (* TODO: this is very dumb *)
       let has_return = match List.last instrs with | Some (`Return _) -> true | _ -> false in
       if has_return
@@ -257,12 +305,9 @@ let translate_instruction (tacky_instr : Tacky.instruction) =
         | `Increment -> Asm.Binary (Add, Immediate 1, user_var_operand)
         | `Decrement -> Asm.Binary (Sub, Immediate 1, user_var_operand) in
       let get_value_instr = Asm.Mov (user_var_operand, out_operand) in
-      let total =
-        match pos with
+      (match pos with
         | `Pre -> [modification_instr; get_value_instr]
-        | `Post -> [get_value_instr; modification_instr] in
-      total
-
+        | `Post -> [get_value_instr; modification_instr])
   | `Binary (binop, in1_var, in2_var, out_var) ->
       let in1_op = value_to_operand in1_var in
       let in2_op = value_to_operand in2_var in
@@ -439,7 +484,7 @@ let print_asm_instructions instr_list =
   List.iter instr_list ~f:(fun instr -> print_s ([%sexp_of : Asm.instruction] instr))
 
 let convert_and_print_total_func (init_func : Ast.statement) =
-  let ast_func = Ast.{name = `Identifier "test"; body = [init_func]} in
+  let ast_func = Ast.{name = `Identifier "test"; body = [(init_func :> Ast.block_item)]} in
   let asm_stack_func =
     Asm_pseudo_to_asm_stack.translate_function @@
       Tacky_to_asm_pseudo.translate_function @@

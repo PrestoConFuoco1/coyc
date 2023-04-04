@@ -30,12 +30,21 @@
 
 %token ASSIGNMENT
 
+%token IF_KW
+%token ELSE_KW
+%token COLON
+%token QUESTION
+
+%right NOELSE ELSE_KW /* shifting wins because of equal precedence */
+
+%nonassoc ASSIGNMENT
+%right QUESTION COLON
 %left OR
 %left AND
 %left EQUAL NOT_EQUAL
 %left LESSER LESSER_OR_EQUAL GREATER GREATER_OR_EQUAL
-%left PLUS MINUS        /* lowest precedence */
-%left TIMES DIV MOD     /* medium precedence */
+%left PLUS MINUS        /* lower precedence */
+%left TIMES DIV MOD     /* higher precedence */
 %nonassoc UMINUS
 
 %start <Ast.program option> prog
@@ -48,17 +57,28 @@ prog:
 
 function_definition:
   INT_KW; name = IDENTIFIER; PAREN_OPEN; PAREN_CLOSE;
-    BRACE_OPEN; body = list(statement); BRACE_CLOSE
+    BRACE_OPEN; body = list(block_item); BRACE_CLOSE
       {
         {Ast.funcs = {Ast.name = `Identifier name; body}}
       };
 
-statement:
-  | RETURN_KW; e = expression; SEMICOLON { `Return e }
-  | e = expression; SEMICOLON { `Expression e }
+block_item:
   | INT_KW; name = IDENTIFIER;
       opt_init = option(ASSIGNMENT; e = expression { e }); SEMICOLON
       { `Declare (`Identifier name, opt_init) }
+  | s = statement { s :> Ast.block_item }
+
+statement:
+  | RETURN_KW; e = expression; SEMICOLON { `Return e }
+  | e = expression; SEMICOLON { `Expression e }
+
+  | IF_KW; PAREN_OPEN; cond_expr = expression; PAREN_CLOSE;
+      true_stmt = statement;
+      ELSE_KW; false_stmt = statement
+      { `IfElse (cond_expr, true_stmt, Some false_stmt) }
+  | IF_KW; PAREN_OPEN; cond_expr = expression; PAREN_CLOSE;
+      true_stmt = statement %prec NOELSE
+      { `IfElse (cond_expr, true_stmt, None) }
 
 expression:
   | const = CONSTANT
@@ -70,6 +90,7 @@ expression:
 
   | PAREN_OPEN; e = expression; PAREN_CLOSE
     { e }
+
   | e1 = expression; PLUS; e2 = expression { `Binary (`Add, e1, e2) }
   | e1 = expression; MINUS; e2 = expression { `Binary (`Subtract, e1, e2) }
   | e1 = expression; TIMES; e2 = expression { `Binary (`Multiply, e1, e2) }
@@ -86,8 +107,12 @@ expression:
 
   | e1 = expression; AND; e2 = expression { `Binary (`And, e1, e2) }
   | e1 = expression; OR; e2 = expression { `Binary (`Or, e1, e2) }
-  | var = IDENTIFIER; ASSIGNMENT; e = expression { `Assign (`Identifier var, e) } %prec UMINUS
+
+  | var = IDENTIFIER; ASSIGNMENT; e = expression { `Assign (`Identifier var, e) }
   | var = IDENTIFIER { `Var (`Identifier var) }
+
+  | cond = expression; QUESTION; true_expr = expression; COLON; false_expr = expression
+      { `Ternary (cond, true_expr, false_expr) }
 
 unop:
   | MINUS { `Negate }
