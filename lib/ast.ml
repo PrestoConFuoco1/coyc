@@ -10,6 +10,15 @@ type ast = [
 type identifier = [ `Identifier of string ]
   [@@deriving sexp]
 
+type unary_pos = [ `Pre | `Post ]
+  [@@deriving sexp]
+
+type inc_dec =
+  [ `Decrement
+  | `Increment
+  ]
+  [@@deriving sexp]
+
 type unary_operator =
   [ `Complement
   | `Negate
@@ -47,6 +56,7 @@ type binary_operator =
 type expression =
   [ `Constant of int
   | `Unary of unary_operator * expression
+  | `IncDec of unary_pos * inc_dec * identifier
   | `Binary of binary_operator * expression * expression
   | `Assign of identifier * expression
   | `Var of identifier

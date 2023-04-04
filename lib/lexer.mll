@@ -27,6 +27,7 @@ rule read =
   | ';'      { SEMICOLON }
 
   | "--"     { DECREMENT }
+  | "++"     { INCREMENT }
   | '-'      { MINUS }
   | '+'      { PLUS }
   | '/'      { DIV }

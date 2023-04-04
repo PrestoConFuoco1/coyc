@@ -3,6 +3,15 @@ open Core
 type identifier = [ `Identifier of string ]
   [@@deriving sexp]
 
+type unary_pos = [ `Pre | `Post ]
+  [@@deriving sexp]
+
+type inc_dec =
+  [ `Decrement
+  | `Increment
+  ]
+  [@@deriving sexp]
+
 type unary_operator =
   [ `Complement 
   | `Negate
@@ -45,6 +54,7 @@ type value =
 type instruction =
   [ `Return of value
   | `Unary of (unary_operator * value * value) (* first is source, second is dest *)
+  | `IncDec of (unary_pos * inc_dec * value * value)
   | `Binary of (binary_operator * value * value * value)
   | `Copy of (value * value)
   | `Jump of identifier

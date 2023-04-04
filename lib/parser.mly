@@ -8,6 +8,7 @@
 %token PAREN_CLOSE
 %token SEMICOLON
 %token DECREMENT
+%token INCREMENT
 %token MINUS
 %token COMPLEMENT
 %token EOF
@@ -64,6 +65,9 @@ expression:
     { `Constant const } 
   | u = unop; e = expression %prec UMINUS
     { `Unary (u, e) }
+  | var = IDENTIFIER; u = unop_postfix { `IncDec (`Post, u, `Identifier var) }
+  | u = unop_postfix; var = IDENTIFIER { `IncDec (`Pre, u, `Identifier var) }
+
   | PAREN_OPEN; e = expression; PAREN_CLOSE
     { e }
   | e1 = expression; PLUS; e2 = expression { `Binary (`Add, e1, e2) }
@@ -86,7 +90,10 @@ expression:
   | var = IDENTIFIER { `Var (`Identifier var) }
 
 unop:
-  | DECREMENT { failwith "not implemented" }
   | MINUS { `Negate }
   | COMPLEMENT { `Complement }
   | NOT { `Not }
+
+unop_postfix:
+  | DECREMENT { `Decrement }
+  | INCREMENT { `Increment }

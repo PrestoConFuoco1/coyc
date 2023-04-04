@@ -110,6 +110,12 @@ and check_variable_exists (`Identifier var_name) : (bool, accum) State.t =
 
 and report_unknown_user_var (`Identifier id) = failwith ("Variable doesn't exist: " ^ id)
 
+and report_if_variable_doesn't_exist var =
+  let open State.Let_syntax in
+  let%bind exists = check_variable_exists var in
+  if not exists then report_unknown_user_var var;
+  State.return ()
+
 and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list * Tacky.value, accum) State.t =
   let open State.Let_syntax in
   match ast_expr with
@@ -119,6 +125,11 @@ and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list *
       let new_var = `Var (`Identifier (mk_fresh_var ())) in
       let assign = `Unary (unop, val_, new_var) in
       State.return (instrs @ [assign], new_var)
+  | `IncDec (pos, incdec, var) ->
+      let%bind () = report_if_variable_doesn't_exist var in
+      let user_var = `UserVar var in
+      let new_var = `Var (`Identifier (mk_fresh_var ())) in
+      State.return ([`IncDec (pos, incdec, user_var, new_var)], new_var)
   | `Binary (binop, expr1, expr2) ->
       (match binop with
       | `And -> translate_and_expression expr1 expr2
@@ -132,14 +143,12 @@ and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list *
         let assign = `Binary (binop_, val1, val2, new_var) in
         State.return (List.concat [instrs1; instrs2; [assign]], new_var))
   | `Assign (var, expr) ->
-      let%bind exists = check_variable_exists var in
-      (if not exists then report_unknown_user_var var);
+      let%bind () = report_if_variable_doesn't_exist var in
       let%bind (instrs, val_) = translate_expression expr in
       let user_var = `UserVar var in
       State.return (instrs @ [`Copy (val_, user_var)], user_var)
   | `Var var ->
-      let%bind exists = check_variable_exists var in
-      (if not exists then report_unknown_user_var var);
+      let%bind () = report_if_variable_doesn't_exist var in
       State.return ([], `UserVar var)
 
 let insert_new_user_var (`Identifier identifier) : (unit, accum) State.t =
@@ -219,8 +228,8 @@ module Tacky_to_asm_pseudo = struct
 let value_to_operand (tacky_value : Tacky.value) =
   match tacky_value with
   | `Constant const -> Asm.Immediate const
-  | `Var identifier -> Asm.Pseudo identifier
-  (* TODO: !!! separate namespaces! *)
+  (* separate namespaces for two types of pseudo registers *)
+  | `Var (`Identifier identifier) -> Asm.Pseudo (`Identifier ("." ^ identifier))
   | `UserVar identifier -> Asm.Pseudo identifier
 
 let translate_instruction (tacky_instr : Tacky.instruction) =
@@ -240,6 +249,19 @@ let translate_instruction (tacky_instr : Tacky.instruction) =
           ; Mov (Immediate 0, out_operand)
           ; SetCC (E, out_operand)
           ])
+  | `IncDec (pos, incdec, user_var, out_var) ->
+      let out_operand = value_to_operand out_var in
+      let user_var_operand = value_to_operand user_var in
+      let modification_instr =
+        match incdec with
+        | `Increment -> Asm.Binary (Add, Immediate 1, user_var_operand)
+        | `Decrement -> Asm.Binary (Sub, Immediate 1, user_var_operand) in
+      let get_value_instr = Asm.Mov (user_var_operand, out_operand) in
+      let total =
+        match pos with
+        | `Pre -> [modification_instr; get_value_instr]
+        | `Post -> [get_value_instr; modification_instr] in
+      total
 
   | `Binary (binop, in1_var, in2_var, out_var) ->
       let in1_op = value_to_operand in1_var in
@@ -292,7 +314,6 @@ let translate_instruction (tacky_instr : Tacky.instruction) =
       ; JmpCC (condition, label)
       ]
   | `Label label -> [Asm.Label label]
-
 
 let translate_function tacky_func =
   Tacky.
