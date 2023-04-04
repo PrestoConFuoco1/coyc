@@ -34,30 +34,22 @@ let get_new_label_idx () =
   Int.incr label_counter;
   res
 
-let mk_fresh_false_label () =
+let mk_fresh_label label () = 
   let n = get_new_label_idx () in
-  "false_label" ^ Int.to_string n
+  label ^ Int.to_string n
 
-let mk_fresh_true_label () =
-  let n = get_new_label_idx () in
-  "true_label" ^ Int.to_string n
-
-let mk_fresh_end_label () =
-  let n = get_new_label_idx () in
-  "end" ^ Int.to_string n
+let mk_fresh_false_label = mk_fresh_label "false_label"
+let mk_fresh_true_label = mk_fresh_label "true_label"
+let mk_fresh_end_label = mk_fresh_label "end"
 
 module Ast_to_tacky = struct
-
-(* use this to make sure that all names in tacky are globally unique *)
-(* let global_name_storage =  *)
 
 let var_name_list = ["camel"; "tiger"; "koala"; "rat"; "goat"]
 
 let mk_fresh_var () : string =
-  let rand_int = Random.int_incl 100 999 in
+  let rand_int = get_new_label_idx () in
   let var_name = List.random_element_exn var_name_list in
   var_name ^ Int.to_string rand_int
-
 
 let rec translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list * Tacky.value) =
   match ast_expr with
@@ -149,15 +141,15 @@ let%expect_test "return constant" =
 let%expect_test "one unary" =
   convert_and_print @@ Ast.Return (`Unary (`Complement, (`Constant 2)));
   [%expect {|
-    (Unary (Complement (Constant 2) (Var (Identifier koala574))))
-    (Return (Var (Identifier koala574))) |}]
+    (Unary (Complement (Constant 2) (Var (Identifier goat0))))
+    (Return (Var (Identifier goat0))) |}]
 
 let%expect_test "one unary" =
   convert_and_print @@ Ast.Return (`Unary (`Complement, (`Unary (`Negate, (`Constant 2)))));
   [%expect {|
-    (Unary (Negate (Constant 2) (Var (Identifier koala574))))
-    (Unary (Complement (Var (Identifier koala574)) (Var (Identifier camel368))))
-    (Return (Var (Identifier camel368))) |}]
+    (Unary (Negate (Constant 2) (Var (Identifier goat1))))
+    (Unary (Complement (Var (Identifier goat1)) (Var (Identifier koala2))))
+    (Return (Var (Identifier koala2))) |}]
 
 module Tacky_to_asm_pseudo = struct
 
@@ -298,8 +290,6 @@ let replace_step instr =
   | AllocateStack _offset ->
       failwith "there shouldn't be any stack related instructions before this step"
   | (Ret | Cdq | Jmp _ | JmpCC _ | Label _) as const_instr -> State.return const_instr
-
-(* (Cmp (_, _)|Jmp _|JmpCC (_, _)|SetCC (_, _)|Label _) *)
 
 (* We use R10 to fix the first operand and R11 to fix the second one *)
 let fix_instruction asm_pseudo_instr : Asm.instruction list =
