@@ -61,16 +61,16 @@ type statement =
   [ `Return of expression
   | `Expression of expression
   | `IfElse of (expression * statement * statement option)
+  | `Compound of block_item list
   ]
   [@@deriving sexp]
 
-type declaration = [ `Declare of (identifier * expression option) ]
+and declaration = [ `Declare of (identifier * expression option) ]
   [@@deriving sexp]
 
-type block_item =
-  [ statement
-  | declaration
-  ]
+and block_item =
+  | Statement of statement
+  | Declaration of declaration
   [@@deriving sexp]
 
 type function_definition =

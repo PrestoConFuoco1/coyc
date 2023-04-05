@@ -65,8 +65,8 @@ function_definition:
 block_item:
   | INT_KW; name = IDENTIFIER;
       opt_init = option(ASSIGNMENT; e = expression { e }); SEMICOLON
-      { `Declare (`Identifier name, opt_init) }
-  | s = statement { s :> Ast.block_item }
+      { Declaration (`Declare (`Identifier name, opt_init)) }
+  | s = statement { Statement s }
 
 statement:
   | RETURN_KW; e = expression; SEMICOLON { `Return e }
@@ -79,6 +79,8 @@ statement:
   | IF_KW; PAREN_OPEN; cond_expr = expression; PAREN_CLOSE;
       true_stmt = statement %prec NOELSE
       { `IfElse (cond_expr, true_stmt, None) }
+
+  | BRACE_OPEN; items = list(block_item); BRACE_CLOSE { `Compound items }
 
 expression:
   | const = CONSTANT

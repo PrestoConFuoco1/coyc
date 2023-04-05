@@ -44,10 +44,16 @@ type binary_operator =
   ]
   [@@deriving sexp]
 
+type block_index = int
+  [@@deriving sexp]
+
+type user_var = [ `UserVar of (identifier * block_index) ]
+  [@@deriving sexp]
+
 type value =
   [ `Constant of int
   | `Var of identifier
-  | `UserVar of identifier
+  | user_var
   ]
   [@@deriving sexp]
 
