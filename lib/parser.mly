@@ -35,6 +35,12 @@
 %token COLON
 %token QUESTION
 
+%token FOR_KW
+%token WHILE_KW
+%token DO_KW
+%token BREAK_KW
+%token CONTINUE_KW
+
 %right NOELSE ELSE_KW /* shifting wins because of equal precedence */
 
 %nonassoc ASSIGNMENT
@@ -62,15 +68,18 @@ function_definition:
         {Ast.funcs = {Ast.name = `Identifier name; body}}
       };
 
-block_item:
+declaration:
   | INT_KW; name = IDENTIFIER;
       opt_init = option(ASSIGNMENT; e = expression { e }); SEMICOLON
-      { Declaration (`Declare (`Identifier name, opt_init)) }
+      { `Declare (`Identifier name, opt_init) }
+
+block_item:
+  | d = declaration { Declaration d }
   | s = statement { Statement s }
 
 statement:
   | RETURN_KW; e = expression; SEMICOLON { `Return e }
-  | e = expression; SEMICOLON { `Expression e }
+  | e = option(expression); SEMICOLON { `Expression e }
 
   | IF_KW; PAREN_OPEN; cond_expr = expression; PAREN_CLOSE;
       true_stmt = statement;
@@ -81,6 +90,22 @@ statement:
       { `IfElse (cond_expr, true_stmt, None) }
 
   | BRACE_OPEN; items = list(block_item); BRACE_CLOSE { `Compound items }
+  | FOR_KW; PAREN_OPEN; init = for_initializer; /* initializer already includes semicolon */
+      opt_cond = option(expression); SEMICOLON; opt_post = option(expression); PAREN_CLOSE;
+      body = statement;
+      { `ForLoop (init, Option.value opt_cond ~default:(`Constant 1), opt_post, body) }
+  | WHILE_KW; PAREN_OPEN; cond = expression; PAREN_CLOSE; body = statement
+      { `WhileLoop (cond, body) }
+  | DO_KW; body = statement; WHILE_KW; PAREN_OPEN; cond = expression; PAREN_CLOSE
+      { `DoWhileLoop (body, cond) }
+
+  | CONTINUE_KW { `Continue }
+  | BREAK_KW { `Break }
+
+for_initializer:
+  | SEMICOLON { Ast.None }
+  | e = expression; SEMICOLON { Ast.Expr e }
+  | d = declaration { Ast.Decl d } /* declaration already includes terminating semicolon */
 
 expression:
   | const = CONSTANT

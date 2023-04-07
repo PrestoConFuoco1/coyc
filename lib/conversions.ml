@@ -187,12 +187,24 @@ let insert_new_user_var
     let%bind () = State.update (fun m -> Map.set m ~key:var_name ~data:new_var) in
     State.return new_var
 
+let with_new_block (action : Tacky.block_index -> 'a monad) : 'a monad =
+  let open State.Let_syntax in
+  let new_block_index = get_new_block_idx () in
+  let%bind saved_state = State.get () in
+  let%bind res = action new_block_index in
+  (* Changes made inside compound block are discarded *)
+  let%bind () = State.put saved_state in
+  State.return res
+
 let rec translate_statement (ast_stmt : Ast.statement) : (Tacky.instruction list) monad =
   let open State.Let_syntax in
   match ast_stmt with
-  | `Expression expr ->
-      let%bind (instrs, _) = translate_expression expr in
-      State.return instrs
+  | `Expression opt_expr ->
+      (match opt_expr with
+      | None -> State.return []
+      | Some expr ->
+        let%bind (instrs, _) = translate_expression expr in
+        State.return instrs)
   | `IfElse (cond_expr, true_stmt, opt_false_stmt) ->
       let%bind (cond_instrs, cond_val) = translate_expression cond_expr in
       let%bind true_instrs = translate_statement true_stmt in
@@ -217,33 +229,81 @@ let rec translate_statement (ast_stmt : Ast.statement) : (Tacky.instruction list
         ; [`Label end_label]
         ])
   | `Compound block_item_list ->
-      let new_block_index = get_new_block_idx () in
-      let%bind saved_state = State.get () in
-      let%bind res = map_from_left block_item_list ~f:(translate_block_item new_block_index) in
-      (* Changes made inside compound block are discarded *)
-      let%bind () = State.put saved_state in
-      State.return (List.concat res)
+      with_new_block (fun new_block_index ->
+        let%bind res = map_from_left block_item_list ~f:(translate_block_item new_block_index) in
+        State.return (List.concat res))
   | `Return expr ->
       let%bind (instrs, final_val) = translate_expression expr in
       State.return (instrs @ [ `Return final_val ])
+  | `ForLoop (init_clause, cond_expr, opt_post_expr, body_stmt) ->
+      with_new_block (fun new_block_index ->
+      (* For loop is in fact a compound block *)
+      let%bind init_instrs =
+        match init_clause with
+        | None -> State.return []
+        | Expr init_expr ->
+            let%bind (instrs, _result_val) = translate_expression init_expr in
+            State.return instrs
+        | Decl init_declaration -> translate_declaration new_block_index init_declaration in
+      let cond_label = `Identifier (mk_fresh_label "for_cond" ()) in
+      let%bind (cond_instrs, cond_val) = translate_expression cond_expr in
+      let end_label = `Identifier (mk_fresh_end_label ()) in
+      let%bind body_instrs = translate_statement body_stmt in
+      let%bind post_instrs : Tacky.instruction list monad =
+        match opt_post_expr with
+        | None -> State.return []
+        | Some post_expr -> State.map ~f:fst (translate_expression post_expr) in
+      State.return @@ List.concat
+        [ init_instrs
+        ; [`Label cond_label]
+        ; cond_instrs
+        ; [`JumpIfZero (cond_val, end_label)]
+        ; body_instrs
+        ; post_instrs
+        ; [`Jump cond_label]
+        ; [`Label end_label]
+        ])
+  | `WhileLoop (cond_expr, body_stmt) ->
+      let%bind (cond_instrs, cond_val) = translate_expression cond_expr in
+      let cond_label = `Identifier (mk_fresh_label "while_cond" ()) in
+      let end_label = `Identifier (mk_fresh_end_label ()) in
+      let%bind body_instrs = translate_statement body_stmt in
+      State.return @@ List.concat
+        [ [`Label cond_label]
+        ; cond_instrs
+        ; [`JumpIfZero (cond_val, end_label)]
+        ; body_instrs
+        ; [`Jump cond_label]
+        ; [`Label end_label]
+        ]
+  | `DoWhileLoop (body_stmt, post_cond_expr) ->
+      let%bind body_instrs = translate_statement body_stmt in
+      let start_label = `Identifier (mk_fresh_label "dowhile_start" ()) in
+      let%bind (cond_instrs, cond_val) = translate_expression post_cond_expr in
+      State.return @@ List.concat
+        [ [`Label start_label]
+        ; body_instrs
+        ; cond_instrs
+        ; [`JumpIfNotZero (cond_val, start_label)]
+        ]
+  | `Continue
+  | `Break -> failwith ""
 
-and translate_block_item block_index (ast_block_item : Ast.block_item) : Tacky.instruction list monad =
+and translate_declaration
+      block_index (ast_decl : Ast.declaration) : Tacky.instruction list monad =
   let open State.Let_syntax in
-  match ast_block_item with
-  | Declaration (`Declare (identifier, opt_expr)) ->
+  match ast_decl with
+  | `Declare (identifier, opt_expr) ->
       let%bind (init_instrs, init_val) = match opt_expr with
       | None -> State.return ([], `Constant 0)
       | Some expr -> translate_expression expr in
-      (* TODO: fix *)
       let%bind new_var = insert_new_user_var block_index identifier in
-      (*
-      let%bind var_exists = check_variable_exists identifier in
-      if var_exists
-      then report_variable_already_exists identifier
-      else
-        let%bind () = insert_new_user_var block_index identifier in
-*)
       State.return (init_instrs @ [`Copy (init_val, (new_var :> Tacky.value))])
+
+and translate_block_item
+      block_index (ast_block_item : Ast.block_item) : Tacky.instruction list monad =
+  match ast_block_item with
+  | Declaration declaration -> translate_declaration block_index declaration
   | Statement stmt -> translate_statement stmt
 
 let translate_function ast_func =

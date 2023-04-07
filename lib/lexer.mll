@@ -13,6 +13,11 @@ let int_k = "int"
 let return_k = "return"
 let if_k = "if"
 let else_k = "else"
+let for_k = "for"
+let while_k = "while"
+let do_k = "do"
+let break_k = "break"
+let continue_k = "continue"
 
 rule read =
   parse
@@ -22,6 +27,11 @@ rule read =
   | return_k { RETURN_KW }
   | if_k     { IF_KW }
   | else_k   { ELSE_KW }
+  | for_k    { FOR_KW }
+  | while_k    { WHILE_KW }
+  | do_k     { DO_KW }
+  | break_k  { BREAK_KW }
+  | continue_k { CONTINUE_KW }
   | constant { CONSTANT (int_of_string (Lexing.lexeme lexbuf)) }
   | identifier { IDENTIFIER (Lexing.lexeme lexbuf) }
   | '{'      { BRACE_OPEN }

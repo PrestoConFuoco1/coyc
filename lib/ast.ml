@@ -59,10 +59,21 @@ type expression =
 
 type statement =
   [ `Return of expression
-  | `Expression of expression
+  | `Expression of expression option
   | `IfElse of (expression * statement * statement option)
   | `Compound of block_item list
+  | `ForLoop of (for_initializer * expression * expression option * statement)
+  | `WhileLoop of (expression * statement)
+  | `DoWhileLoop of (statement * expression)
+  | `Break    (* These statements are allowed to occur outside loops *)
+  | `Continue (* This will be fixed during code generation, not parsing *)
   ]
+  [@@deriving sexp]
+
+and for_initializer =
+  | None
+  | Expr of expression
+  | Decl of declaration
   [@@deriving sexp]
 
 and declaration = [ `Declare of (identifier * expression option) ]

@@ -7,11 +7,14 @@ if expand('%') == '' && !&modified && line('$') <= 1 && getline(1) == ''
   let s:wipebuf = bufnr('%')
 endif
 set shortmess=aoO
-badd +51 conversions.ml
+badd +240 conversions.ml
 badd +1 tacky.ml
-badd +131 asm.ml
+badd +5 asm.ml
 badd +2 lexer.mll
 badd +1 parser.mly
+badd +68 ast.ml
+badd +0 ../stage8/for.c
+badd +0 ../stage8/while_multi_statement.c
 argglobal
 %argdel
 $argadd conversions.ml
@@ -35,12 +38,12 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 44 - ((31 * winheight(0) + 18) / 37)
+let s:l = 30 - ((24 * winheight(0) + 18) / 37)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-44
-normal! 0
+30
+normal! 023|
 tabedit parser.mly
 set splitbelow splitright
 set nosplitbelow
@@ -60,13 +63,13 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 73 - ((14 * winheight(0) + 18) / 37)
+let s:l = 93 - ((16 * winheight(0) + 18) / 37)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-73
+93
 normal! 0
-tabedit asm.ml
+tabedit ../stage8/while_multi_statement.c
 set splitbelow splitright
 set nosplitbelow
 set nosplitright
@@ -85,11 +88,36 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 5 - ((4 * winheight(0) + 18) / 37)
+let s:l = 1 - ((0 * winheight(0) + 18) / 37)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-5
+1
+normal! 0
+tabedit ast.ml
+set splitbelow splitright
+set nosplitbelow
+set nosplitright
+wincmd t
+set winminheight=0
+set winheight=1
+set winminwidth=0
+set winwidth=1
+argglobal
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=0
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+silent! normal! zE
+let s:l = 69 - ((33 * winheight(0) + 18) / 37)
+if s:l < 1 | let s:l = 1 | endif
+exe s:l
+normal! zt
+69
 normal! 0
 tabedit asm.ml
 set splitbelow splitright
@@ -135,11 +163,11 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 48 - ((36 * winheight(0) + 18) / 37)
+let s:l = 46 - ((34 * winheight(0) + 18) / 37)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-48
+46
 normal! 0
 tabedit conversions.ml
 set splitbelow splitright
@@ -160,13 +188,13 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 60 - ((25 * winheight(0) + 18) / 37)
+let s:l = 262 - ((31 * winheight(0) + 18) / 37)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-60
-normal! 0
-tabnext 4
+262
+normal! 03|
+tabnext 7
 set stal=1
 if exists('s:wipebuf') && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
