@@ -99,8 +99,8 @@ statement:
   | DO_KW; body = statement; WHILE_KW; PAREN_OPEN; cond = expression; PAREN_CLOSE
       { `DoWhileLoop (body, cond) }
 
-  | CONTINUE_KW { `Continue }
-  | BREAK_KW { `Break }
+  | CONTINUE_KW; SEMICOLON { `Continue }
+  | BREAK_KW; SEMICOLON { `Break }
 
 for_initializer:
   | SEMICOLON { Ast.None }

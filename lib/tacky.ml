@@ -57,16 +57,20 @@ type value =
   ]
   [@@deriving sexp]
 
+type label =
+  [ `Label of identifier ]
+  [@@deriving sexp]
+
 type instruction =
   [ `Return of value
   | `Unary of (unary_operator * value * value) (* first is source, second is dest *)
   | `IncDec of (unary_pos * inc_dec * value * value)
   | `Binary of (binary_operator * value * value * value)
   | `Copy of (value * value)
-  | `Jump of identifier
-  | `JumpIfZero of (value * identifier)
-  | `JumpIfNotZero of (value * identifier)
-  | `Label of identifier
+  | `Jump of label
+  | `JumpIfZero of (value * label)
+  | `JumpIfNotZero of (value * label)
+  | label
   ]
   [@@deriving sexp]
 
