@@ -47,7 +47,10 @@ type binary_operator =
 type block_index = int
   [@@deriving sexp]
 
-type user_var = [ `UserVar of (identifier * block_index) ]
+type user_var =
+  [ `UserVar of (identifier * block_index)
+  | `FunArg of int (* Index of function argument, starting from 0 *)
+  ]
   [@@deriving sexp]
 
 type value =
@@ -71,6 +74,7 @@ type instruction =
   | `JumpIfZero of (value * label)
   | `JumpIfNotZero of (value * label)
   | label
+  | `FunCall of (identifier * value list * value)
   ]
   [@@deriving sexp]
 
@@ -81,7 +85,7 @@ type function_definition =
   [@@deriving sexp]
 
 type program =
-  { funcs : function_definition
+  { funcs : function_definition list
   }
   [@@deriving sexp]
 

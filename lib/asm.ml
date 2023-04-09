@@ -1,6 +1,7 @@
 open Base
 open Sexplib.Conv
 open Printf
+(* open Stdio *)
 
 (* let undefined = failwith "" *)
 
@@ -17,11 +18,17 @@ type reg =
 type cond_code = E | NE | G | GE | L | LE
   [@@deriving sexp]
 
+type stack_reg =
+  | RSP
+  | RBP
+  [@@deriving sexp]
+
 type operand =
   | Immediate of int
   | Register of reg
   | Pseudo of identifier
-  | Stack of int (* -4(%rbp) <-> Stack(-4) *)
+  | FunArg of int
+  | Stack of (int * stack_reg) (* -4(%rbp) <-> Stack(-4) *)
   [@@deriving sexp]
 
 type unary_operator = Neg | Not
@@ -44,6 +51,8 @@ type instruction =
   | Label of identifier
 
   | AllocateStack of int (* subq $n, %rsp *)
+  | DeallocateStack of int (* addq $n, %rsp *)
+  | Call of identifier
   | Ret
   [@@deriving sexp]
 
@@ -54,7 +63,7 @@ type function_definition =
   [@@deriving sexp]
 
 type program =
-  { funcs : function_definition
+  { funcs : function_definition list
   }
   [@@deriving sexp]
 
@@ -77,11 +86,19 @@ let render_register size = function
 let binary_instruction =
   sprintf "\t%s\t%s, %s"
 
+let render_reg_offset offset reg = sprintf "%d(%%%s)" offset reg
+
+let render_stack_reg = function
+  | RSP -> "rsp"
+  | RBP -> "rbp"
+
 let render_operand size = function
   | Immediate i -> sprintf "$%d" i
   | Register reg -> sprintf "%%%s" (render_register size reg)
-  | Pseudo _ -> failwith "Internal error: there shouldn't be pseudo registers at this stage"
-  | Stack offset -> sprintf "%d(%%rbp)" offset
+  | Pseudo _ ->
+      failwith "Internal error: there shouldn't be pseudo registers at this stage"
+  | Stack (offset, reg) -> sprintf "%d(%%%s)" offset (render_stack_reg reg)
+  | FunArg _ -> failwith "Internal error: there shouldn't be function arguments at this stage"
 
 let render_unary_operator = function
   | Neg -> "negl"
@@ -124,11 +141,14 @@ let render_instruction = function
   | Ret -> function_epilogue @ ["\tret"]
   | AllocateStack alloc_size ->
       [binary_instruction "subq" (render_operand B4 (Immediate alloc_size)) "%rsp"]
+  | DeallocateStack alloc_size ->
+      [binary_instruction "addq" (render_operand B4 (Immediate alloc_size)) "%rsp"]
   | Label label -> [render_label_colon label]
   | Cmp (o1, o2) -> [binary_instruction "cmpl" (render_operand B4 o1) (render_operand B4 o2)]
   | Jmp label -> [sprintf "\tjmp\t%s" (render_label label)]
   | JmpCC (cond, label) -> [sprintf "\tj%s\t%s" (render_condition cond) (render_label label)]
   | SetCC (cond, op) -> [sprintf "\tset%s\t%s" (render_condition cond) (render_operand B1 op)]
+  | Call (`Identifier fun_name) -> [sprintf "\tcall\t%s" fun_name]
 
 let render_function p =
   let `Identifier fname = p.name in
@@ -136,5 +156,6 @@ let render_function p =
   sprintf "%s:" fname :: (function_prologue @ rend_instr)
 
 let render_program (p : program) =
+(*   print_s [%sexp (p : program)]; *)
   let main_glob = "\t.globl\tmain" in
-  CCString.unlines (main_glob :: render_function p.funcs)
+  CCString.unlines (main_glob :: List.concat_map ~f:render_function p.funcs)

@@ -39,6 +39,7 @@ rule read =
   | '('      { PAREN_OPEN }
   | ')'      { PAREN_CLOSE }
   | ';'      { SEMICOLON }
+  | ','      { COMMA }
 
   | "--"     { DECREMENT }
   | "++"     { INCREMENT }

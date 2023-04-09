@@ -1,3 +1,4 @@
+%token EOF
 %token <string> IDENTIFIER
 %token <int> CONSTANT
 %token INT_KW
@@ -7,11 +8,11 @@
 %token PAREN_OPEN
 %token PAREN_CLOSE
 %token SEMICOLON
+%token COMMA
 %token DECREMENT
 %token INCREMENT
 %token MINUS
 %token COMPLEMENT
-%token EOF
 %token PLUS
 %token TIMES
 %token DIV
@@ -53,20 +54,30 @@
 %left TIMES DIV MOD     /* higher precedence */
 %nonassoc UMINUS
 
-%start <Ast.program option> prog
+%start <Ast.program> prog
 
 %%
 
 prog: 
-  | v = function_definition { Some v }
-  | EOF       { None   } ;
+  | units = list(program_unit); EOF { { Ast.program_units = units } }
+
+program_unit:
+  | decl = function_declaration { Ast.FuncDeclaration decl }
+  | def = function_definition { Ast.FuncDefinition def }
+
+function_declaration:
+  INT_KW; name = IDENTIFIER;
+    PAREN_OPEN; parameters = separated_list(COMMA, func_parameter); PAREN_CLOSE; SEMICOLON
+    { {name = `Identifier name; parameters} }
 
 function_definition:
-  INT_KW; name = IDENTIFIER; PAREN_OPEN; PAREN_CLOSE;
+  INT_KW; name = IDENTIFIER;
+    PAREN_OPEN; parameters = separated_list(COMMA, func_parameter); PAREN_CLOSE;
     BRACE_OPEN; body = list(block_item); BRACE_CLOSE
-      {
-        {Ast.funcs = {Ast.name = `Identifier name; body}}
-      };
+    { {name = `Identifier name; parameters; body} }
+
+func_parameter:
+  | INT_KW; param_name = IDENTIFIER { `Identifier param_name }
 
 declaration:
   | INT_KW; name = IDENTIFIER;
@@ -140,6 +151,9 @@ expression:
 
   | cond = expression; QUESTION; true_expr = expression; COLON; false_expr = expression
       { `Ternary (cond, true_expr, false_expr) }
+  | fun_name = IDENTIFIER;
+      PAREN_OPEN; params = separated_list(COMMA, expression); PAREN_CLOSE
+      { `FunCall (`Identifier fun_name, params) }
 
 unop:
   | MINUS { `Negate }

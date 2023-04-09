@@ -1,5 +1,6 @@
 open Base
 open Stdio
+open Printf
 
 let get_identifier (`Identifier id) : string = id
 
@@ -14,6 +15,105 @@ let rec map_from_left lst ~f : ('b list, 'c) State.t =
         let%bind xs' = map_from_left xs ~f in
         State.return (x' :: xs')
 
+
+module Validation = struct
+
+type identifier = [ `Identifier of string ]
+  [@@deriving sexp]
+
+type func_param = identifier
+
+type func_map_value =
+  { type_sig : Ast.type_sig
+  ; defined : bool
+  }
+
+type func_map = (string, func_map_value, Base.String.comparator_witness) Base.Map.t
+
+let validate_type_sig fun_name prev_sig cur_sig =
+  let prev_len = List.length prev_sig in
+  let cur_len = List.length cur_sig in
+  if not (prev_len = cur_len)
+    then failwith
+      (sprintf
+        {|type mismatch for function %s: previous declarations
+          had %d parameters, but this has %d ones|}
+        fun_name prev_len cur_len)
+
+let validate_declaration (acc : func_map) ({Ast.name; parameters = type_sig} : Ast.function_declaration) =
+  let fun_name = get_identifier name in
+  let opt_existing_decl = Map.find acc fun_name in
+  match opt_existing_decl with
+  | None -> Map.set acc ~key:fun_name ~data:{type_sig; defined = false}
+  | Some prev_sig -> validate_type_sig fun_name prev_sig.type_sig type_sig; acc
+
+let rec validate_expression (acc : func_map) x =
+  match x with
+  | `FunCall (fun_ident, args) ->
+      let fun_name = get_identifier fun_ident in
+      let opt_fun_sig = Map.find acc fun_name in
+      (match opt_fun_sig with
+      | None -> failwith (sprintf "function '%s' not found" fun_name)
+      | Some fun_sig ->
+          let expected_args_num = List.length fun_sig.type_sig in
+          let actual_args_num = List.length args in
+(*           printf "function call %s: expected: %d; actual %d" fun_name expected_args_num actual_args_num; *)
+          if not (expected_args_num = actual_args_num)
+          then failwith (sprintf "invalid function call: expected %d args, but got %d args" expected_args_num actual_args_num))
+  | _ -> ()
+
+and validate_statement acc x : unit =
+  match x with
+  | `Return expr -> validate_expression acc expr
+  | `Expression opt_expr -> Option.iter opt_expr ~f:(validate_expression acc)
+  | `IfElse (expr1, stmt1, opt_stmt2) ->
+      validate_expression acc expr1;
+      validate_statement acc stmt1;
+      Option.iter opt_stmt2 ~f:(validate_statement acc)
+  | `Compound block_item_list -> List.iter block_item_list ~f:(validate_block_item acc)
+  | `ForLoop (for_initializer, cond_expr, opt_post_expr, body_stmt) ->
+      (match for_initializer with
+      | Ast.None -> ()
+      | Expr expr -> validate_expression acc expr
+      | Decl (`Declare (_, opt_expr)) -> Option.iter opt_expr ~f:(validate_expression acc));
+      validate_expression acc cond_expr;
+      Option.iter opt_post_expr ~f:(validate_expression acc);
+      validate_statement acc body_stmt
+  | `WhileLoop (expr, stmt) ->
+      validate_expression acc expr;
+      validate_statement acc stmt;
+  | `DoWhileLoop (stmt, expr) ->
+      validate_statement acc stmt;
+      validate_expression acc expr;
+  | `Break -> ()
+  | `Continue -> ()
+
+and validate_block_item acc = function
+  | Ast.Declaration (`Declare (_, opt_expr)) -> Option.iter opt_expr ~f:(validate_expression acc)
+  | Statement stmt -> validate_statement acc stmt
+
+let validate_definition acc ({Ast.name; parameters = type_sig; body}) =
+  let fun_name = get_identifier name in
+  let opt_existing_decl = Map.find acc fun_name in
+  let new_acc =
+    match opt_existing_decl with
+    | None -> Map.set acc ~key:fun_name ~data:{type_sig; defined = true}
+    | Some prev_sig ->
+        if prev_sig.defined
+        then failwith (sprintf "function %s already defined" fun_name);
+        validate_type_sig fun_name prev_sig.type_sig type_sig; acc in
+  List.iter body ~f:(validate_block_item new_acc);
+  new_acc
+
+let validate_program p =
+  ignore @@
+  let empty_accum = Map.empty(module String) in
+  List.fold p.Ast.program_units ~init:empty_accum ~f:(fun acc unit_ ->
+    match unit_ with
+    | Ast.FuncDeclaration func_decl -> validate_declaration acc func_decl
+    | FuncDefinition func_def -> validate_definition acc func_def)
+
+end
 
 let label_counter = ref 0
 
@@ -133,10 +233,6 @@ and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list *
       State.return (instrs @ [assign], new_var)
   | `IncDec (pos, incdec, var) ->
       let%bind user_var = get_user_var_value var in
-(*
-      let%bind () = report_if_variable_doesn't_exist var in
-      let user_var = `UserVar var in
-*)
       let new_var = `Var (`Identifier (mk_fresh_var ())) in
       State.return ([`IncDec (pos, incdec, user_var, new_var)], new_var)
   | `Binary (binop, expr1, expr2) ->
@@ -152,10 +248,8 @@ and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list *
         let assign = `Binary (binop_, val1, val2, new_var) in
         State.return (List.concat [instrs1; instrs2; [assign]], new_var))
   | `Assign (var, expr) ->
-(*       let%bind () = report_if_variable_doesn't_exist var in *)
       let%bind user_var = get_user_var_value var in
       let%bind (instrs, val_) = translate_expression expr in
-(*       let user_var = `UserVar var in *)
       State.return (instrs @ [`Copy (val_, user_var)], user_var)
   | `Var var ->
       let%bind user_var = get_user_var_value var in
@@ -180,6 +274,15 @@ and translate_expression (ast_expr : Ast.expression) : (Tacky.instruction list *
       ; [end_label]
       ]
       , new_var)
+  | `FunCall (fun_name, args) ->
+      let%bind instrs'vals = map_from_left args ~f:translate_expression in
+      let (instrs, vals) = List.unzip instrs'vals in
+      let new_var = `Var (`Identifier (mk_fresh_var ())) in
+      State.return @@ (List.concat
+        [ List.concat instrs
+        ; [`FunCall (fun_name, vals, new_var)]
+        ], new_var)
+
 
 let report_variable_already_exists (`Identifier id) = "Variable already exists: " ^ id
 
@@ -189,8 +292,8 @@ let insert_new_user_var
   let%bind opt_old_var = get_user_var var_identifier in
   let is_defined_in_current_block =
     match opt_old_var with
-    | None -> false
-    | Some (`UserVar (_, var_block_index)) -> block_index = var_block_index in
+    | Some (`UserVar (_, var_block_index)) -> block_index = var_block_index
+    | _ -> false in
   if is_defined_in_current_block
   then failwith (report_variable_already_exists var_identifier)
   else
@@ -357,11 +460,14 @@ and translate_block_item
   | Declaration declaration -> translate_declaration block_index declaration
   | Statement stmt -> translate_statement stmt
 
-let translate_function ast_func =
-  { Tacky.name = ast_func.Ast.name
+let translate_function_definition ({Ast.name; body; parameters}) =
+  { Tacky.name = name
   ; Tacky.body =
+      let var_map_params = List.foldi parameters ~init:empty_accum.var_map ~f:(fun idx acc param ->
+        Map.set acc ~key:(get_identifier param) ~data:(`FunArg idx)) in
+      let init_accum = {empty_accum with var_map = var_map_params} in
       let instrs = List.concat (State.eval (map_from_left
-        ~f:(translate_block_item (get_new_block_idx ())) ast_func.body) empty_accum) in
+        ~f:(translate_block_item (get_new_block_idx ())) body) init_accum) in
       (* TODO: this is very dumb *)
       let has_return = match List.last instrs with | Some (`Return _) -> true | _ -> false in
       if has_return
@@ -369,8 +475,12 @@ let translate_function ast_func =
       else instrs @ [`Return (`Constant 0)]
   }
 
+let translate_program_unit = function
+  | Ast.FuncDeclaration _func_decl -> []
+  | FuncDefinition func_def -> [translate_function_definition func_def]
+
 let translate_program ast_prog =
-  {Tacky.funcs = translate_function Ast.(ast_prog.funcs)}
+  {Tacky.funcs = List.concat_map ~f:translate_program_unit Ast.(ast_prog.program_units)}
 
 end
 
@@ -409,6 +519,7 @@ let value_to_operand (tacky_value : Tacky.value) =
   (* separate namespaces for two types of pseudo registers *)
   | `Var (`Identifier identifier) -> Asm.Pseudo (`Identifier ("." ^ identifier))
   | `UserVar (`Identifier var_name, block_index) -> Asm.Pseudo (`Identifier (var_name ^ Int.to_string block_index))
+  | `FunArg arg_index -> Asm.FunArg arg_index
 
 let translate_instruction (tacky_instr : Tacky.instruction) =
   match tacky_instr with
@@ -489,6 +600,23 @@ let translate_instruction (tacky_instr : Tacky.instruction) =
       ; JmpCC (condition, label)
       ]
   | `Label label -> [Asm.Label label]
+  | `FunCall (fun_name, args, out_var) ->
+      let args_ops = List.map ~f:value_to_operand args in
+      let (add_instrs, total_offset) = List.fold args_ops ~init:([], 0) ~f:(fun (instrs, offset) x ->
+        let operand_size = 4 (* TODO *) in
+        let new_offset = offset + operand_size in
+        let cur_instr = Asm.Mov (x, Stack (offset, RSP)) in
+        (instrs @ [cur_instr], new_offset)) in
+
+      let out_op = value_to_operand out_var in
+      List.concat
+      [ [Asm.AllocateStack total_offset]
+      ; add_instrs
+      ; [Asm.Call fun_name]
+      ; [Asm.DeallocateStack total_offset]
+      ; [Asm.Mov (Register AX, out_op)]
+      ]
+
 
 let translate_function tacky_func =
   Tacky.
@@ -497,7 +625,7 @@ let translate_function tacky_func =
   }
 
 let translate_program (tacky_prog : Tacky.program) =
-  { Asm.funcs = translate_function tacky_prog.funcs }
+   { Asm.funcs = List.map ~f:translate_function tacky_prog.funcs }
 
 end
 
@@ -505,14 +633,17 @@ module Asm_pseudo_to_asm_stack = struct
 
 open Asm
 
-type accum = int * (string, int, Base.String.comparator_witness) Base.Map.t
+type accum =
+  { current_offset : int
+  ; offset_map : (string, int, Base.String.comparator_witness) Base.Map.t
+  }
 
 let replace_operand (asm_pseudo_opd : operand) : (operand, accum) State.t =
   match asm_pseudo_opd with
-  | Immediate _ | Register _ -> State.return asm_pseudo_opd
+  | Immediate _ | Register _ | Stack _ -> State.return asm_pseudo_opd
   | Pseudo (`Identifier identifier) ->
       let open State.Let_syntax in
-      let%bind (current_offset, offset_map) as old_accum = State.get () in
+      let%bind {current_offset; offset_map} as old_accum = State.get () in
 
       let (new_op, new_accum) =
         let opt_existing_offset = Map.find offset_map identifier in
@@ -527,12 +658,12 @@ let replace_operand (asm_pseudo_opd : operand) : (operand, accum) State.t =
               | `Ok new_offset_map -> new_offset_map
               | `Duplicate -> failwith "Internal error: failed to insert new pseudo register"
               in
-            (Stack (- new_current_offset), (new_current_offset, new_offset_map))
-        | Some existing_offset -> (Stack (- existing_offset), old_accum) in
+            (Stack (- new_current_offset, RBP), {current_offset = new_current_offset; offset_map = new_offset_map})
+        | Some existing_offset -> (Stack (- existing_offset, RBP), old_accum) in
       let%bind () = State.put new_accum in
       State.return new_op
-  | Stack _ ->
-      failwith "Internal error: there shouldn't be any stack related instructions before this step"
+(*   | Stack _ -> failwith "Internal error: there shouldn't be any stack related instructions before this step" *)
+  | FunArg arg_index -> State.return (Stack (16 + arg_index * 4, RBP)) (* Our arg index starts from 0 *)
 
 let replace_step instr =
   match instr with
@@ -549,14 +680,11 @@ let replace_step instr =
   | IDiv op -> State.map ~f:(fun x -> IDiv x) (replace_operand op)
   | SetCC (cond, op) ->
       State.map ~f:(fun x -> SetCC (cond, x)) (replace_operand op)
-  | AllocateStack _offset ->
-      failwith "there shouldn't be any stack related instructions before this step"
-  | (Ret | Cdq | Jmp _ | JmpCC _ | Label _) as const_instr -> State.return const_instr
+  | (Ret | Cdq | Jmp _ | JmpCC _ | Label _ | AllocateStack _ | DeallocateStack _ | Call _) as const_instr -> State.return const_instr
 
 (* We use R10 to fix the first operand and R11 to fix the second one *)
 let fix_instruction asm_pseudo_instr : Asm.instruction list =
   match asm_pseudo_instr with
-(*   | Mov (Stack _ as op1, Stack _ as op2) -> [Mov (op1, Register R10); Mov (Register R10, op2)] *)
   | Mov ((Stack _ as op1), (Stack _ as op2)) ->
       [ Mov (op1, Register R10)
       ; Mov (Register R10, op2)
@@ -592,11 +720,12 @@ let fix_instruction asm_pseudo_instr : Asm.instruction list =
   | Cmp _ -> List.return asm_pseudo_instr
 
   | Unary _ | AllocateStack _ | Ret | Cdq
-  | Jmp _ | JmpCC _ | SetCC _ | Label _ -> List.return asm_pseudo_instr
+  | Jmp _ | JmpCC _ | SetCC _ | Label _
+  | DeallocateStack _ | Call _ -> List.return asm_pseudo_instr
 
 let translate_function asm_pseudo_func =
-  let init = ((0, Map.empty (module String)) : accum) in
-  let (new_instructions, (final_offset, _)) =
+  let init = ({current_offset = 0; offset_map = Map.empty (module String)} : accum) in
+  let (new_instructions, {current_offset = final_offset; _}) =
     State.run (map_from_left asm_pseudo_func.body ~f:replace_step) init in
   let new_instructions_fixed = List.concat_map new_instructions ~f:fix_instruction in
   let add_allocate_stack =
@@ -605,20 +734,20 @@ let translate_function asm_pseudo_func =
     else fun instrs -> AllocateStack final_offset :: instrs in
   { asm_pseudo_func with body = add_allocate_stack new_instructions_fixed }
 
-let translate_program (tacky_prog : Asm.program) =
-  { Asm.funcs = translate_function tacky_prog.funcs }
+let translate_program (asm_pseudo_prog : Asm.program) =
+  { Asm.funcs = List.map ~f:translate_function asm_pseudo_prog.funcs }
 
 end
 
 let print_asm_instructions instr_list =
   List.iter instr_list ~f:(fun instr -> print_s ([%sexp_of : Asm.instruction] instr))
 
-let convert_and_print_total_func (init_func : Ast.statement) =
-  let ast_func = Ast.{name = `Identifier "test"; body = [(Statement init_func)]} in
+let convert_and_print_total_func (_init_func : Ast.statement) =
+  let ast_func = failwith "" in
   let asm_stack_func =
     Asm_pseudo_to_asm_stack.translate_function @@
       Tacky_to_asm_pseudo.translate_function @@
-      Ast_to_tacky.translate_function ast_func in
+      Ast_to_tacky.translate_function_definition ast_func in
   print_asm_instructions Asm.(asm_stack_func.body)
 
 let%expect_test "return constant" =
@@ -649,6 +778,7 @@ let%expect_test "one unary" =
     Ret |}]
 
 let total ast =
+  Validation.validate_program ast;
   ast |> Ast_to_tacky.translate_program
       |> Tacky_to_asm_pseudo.translate_program
       |> Asm_pseudo_to_asm_stack.translate_program

@@ -19,7 +19,7 @@ let parse_with_error lexbuf =
   try Parser.prog (fun l -> let t = Lexer.read l in (); t) lexbuf with
   | SyntaxError msg ->
     fprintf stderr "%a: %s\n" print_position lexbuf msg;
-    None
+    failwith "parsing failed"
   | Parser.Error ->
     fprintf stderr "%a: syntax error\n" print_position lexbuf;
     exit (-1)
@@ -28,14 +28,11 @@ let parse_with_error lexbuf =
 
 [@@@part "2"] ;;
 
-let rec parse_and_print lexbuf =
-  match parse_with_error lexbuf with
-  | Some value ->
-    let asm = Conversions.total value in
+let parse_and_print lexbuf =
+  let program = parse_with_error lexbuf in
+    let asm = Conversions.total program in
     let rendered_asm = Asm.render_program asm in
-    Out_channel.write_all "out.s" ~data:rendered_asm;
-    parse_and_print lexbuf
-  | None -> ()
+    Out_channel.write_all "out.s" ~data:rendered_asm
 
 let loop filename () =
   let inx = In_channel.create filename in

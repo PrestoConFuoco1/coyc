@@ -54,6 +54,7 @@ type expression =
   | `Assign of identifier * expression
   | `Var of identifier
   | `Ternary of (expression * expression * expression)
+  | `FunCall of (identifier * expression list)
   ]
   [@@deriving sexp]
 
@@ -84,13 +85,28 @@ and block_item =
   | Declaration of declaration
   [@@deriving sexp]
 
+type type_sig = identifier list
+  [@@deriving sexp]
+
+type function_declaration =
+  { name : identifier
+  ; parameters : type_sig
+  }
+  [@@deriving sexp]
+
 type function_definition =
-  { name : [`Identifier of string]
+  { name : identifier
+  ; parameters : type_sig
   ; body : block_item list
   }
   [@@deriving sexp]
 
+type program_unit =
+  | FuncDeclaration of function_declaration
+  | FuncDefinition of function_definition
+  [@@deriving sexp]
+
 type program =
-  { funcs : function_definition
+  { program_units : program_unit list
   }
   [@@deriving sexp]
